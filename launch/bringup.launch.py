@@ -113,6 +113,7 @@ from launch.actions import (
 )
 from launch.substitutions import Command, LaunchConfiguration
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.actions import IncludeLaunchDescription
 from launch_ros.substitutions import FindPackageShare
@@ -153,7 +154,10 @@ def generate_launch_description():
     map_file     = LaunchConfiguration('map')
     world_file   = LaunchConfiguration('world')
 
-    robot_description = Command(['xacro ', urdf_file])
+    robot_description = ParameterValue(
+        Command(['xacro ', urdf_file]),
+        value_type=str
+    )
 
     # ══════════════════════════════════════════════════════════════════════
     # PHASE 1 — SIMULATION (t = 0 s)

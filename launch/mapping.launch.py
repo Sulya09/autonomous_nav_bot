@@ -76,6 +76,7 @@ from launch.substitutions import (
     Command,
 )
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 from launch_ros.substitutions import FindPackageShare
 
 
@@ -128,7 +129,10 @@ def generate_launch_description():
 
     # ── 2. Robot State Publisher ──────────────────────────────────────────
     # Processes the XACRO → URDF at launch time and broadcasts TF.
-    robot_description = Command(['xacro ', urdf_file])
+    robot_description = ParameterValue(
+        Command(['xacro ', urdf_file]),
+        value_type=str
+    )
 
     robot_state_publisher = Node(
         package='robot_state_publisher',

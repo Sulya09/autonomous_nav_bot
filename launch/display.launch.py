@@ -24,6 +24,19 @@ EXPECTED RESULT
   • A small "Joint State Publisher" slider window appears
   • Moving the sliders visibly rotates the wheels in RViz2
   • The TF display shows all coordinate frames on the robot
+
+ROS 2 HUMBLE — ParameterValue FIX
+  In ROS 2 Humble, passing a raw Command() substitution as a node
+  parameter does not carry type information. robot_state_publisher
+  receives an untyped value, silently ignores it, and the robot model
+  never appears in RViz2. No error is printed — it just doesn't work.
+
+  The fix is to wrap Command() in ParameterValue(..., value_type=str),
+  which explicitly marks the URDF string as a string parameter so the
+  launch system serialises it correctly before passing it to the node.
+
+  Same fix is required in mapping.launch.py and bringup.launch.py
+  wherever robot_description is passed as a node parameter.
 """
 
 import os
@@ -33,6 +46,7 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration, Command
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue   # ← FIX: import
 
 
 def generate_launch_description():
@@ -44,7 +58,6 @@ def generate_launch_description():
     rviz_config = os.path.join(pkg_dir, 'rviz', 'robot_display.rviz')
 
     # ── Declare launch arguments ─────────────────────────────────────────
-    # These can be overridden on the command line: key:=value
     use_sim_time_arg = DeclareLaunchArgument(
         name='use_sim_time',
         default_value='false',
@@ -57,10 +70,17 @@ def generate_launch_description():
     use_sim_time = LaunchConfiguration('use_sim_time')
 
     # ── Process XACRO → URDF string ──────────────────────────────────────
-    # Command(['xacro ', urdf_file]) runs the xacro tool at launch time and
-    # feeds the resulting URDF XML string directly to robot_state_publisher.
-    # This avoids needing a separate pre-build step.
-    robot_description = Command(['xacro ', urdf_file])
+    # Command(['xacro ', urdf_file]) runs the xacro tool at launch time
+    # and returns the resulting URDF XML as a string substitution.
+    #
+    # ParameterValue(..., value_type=str) is REQUIRED in ROS 2 Humble.
+    # Without it, the launch system cannot infer that this substitution
+    # produces a string, and robot_state_publisher silently discards the
+    # parameter — causing the robot model to be absent from RViz2.
+    robot_description = ParameterValue(            # ← FIX: wrap in ParameterValue
+        Command(['xacro ', urdf_file]),
+        value_type=str                             # ← FIX: explicit type hint
+    )
 
     # ── Node 1: Robot State Publisher ────────────────────────────────────
     # Reads the URDF and, together with incoming joint_states messages,
@@ -73,8 +93,8 @@ def generate_launch_description():
         name='robot_state_publisher',
         output='screen',
         parameters=[{
-            'use_sim_time': use_sim_time,
-            'robot_description': robot_description,
+            'use_sim_time':      use_sim_time,
+            'robot_description': robot_description,   # now correctly typed
         }]
     )
 
