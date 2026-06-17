@@ -1,0 +1,223 @@
+# ══════════════════════════════════════════════════════════════════════════
+# config/ekf_params.yaml
+# ───────────────────────
+# Configuration for robot_localization's EKF (Extended Kalman Filter) node.
+#
+# WHAT THE EKF DOES
+# ─────────────────
+# Wheel odometry alone drifts badly. Wheels slip on smooth floors, and
+# small encoder errors compound over distance. The IMU measures rotation
+# accurately but can't measure position. The EKF combines both to produce
+# an estimate that is better than either alone:
+#
+#   /odom        (wheel encoders: good position, bad on slippery floors)
+#      +
+#   /imu/filtered (gyroscope: excellent yaw rate; accelerometer: linear accel)
+#      ↓
+#   [EKF]
+#      ↓
+#   /odometry/filtered  (fused: smoother, more reliable)
+#
+# It also broadcasts the TF: odom → base_footprint
+#
+# THE STATE VECTOR (15 elements)
+# ───────────────────────────────
+# The EKF tracks 15 quantities simultaneously:
+#   Position    : x,     y,     z
+#   Orientation : roll,  pitch, yaw
+#   Lin. velocity: vx,    vy,    vz
+#   Ang. velocity: vroll, vpitch, vyaw
+#   Lin. accel  : ax,    ay,    az
+#
+# For a 2D ground robot, z / roll / pitch / vy / vz / vroll / vpitch / az
+# are all effectively zero. We set two_d_mode: true to enforce this.
+#
+# SENSOR CONFIGURATION ARRAYS (15 booleans each)
+# ────────────────────────────────────────────────
+# Each odomN_config / imuN_config array maps to the 15 state elements above.
+# true  = "use this measurement from this sensor"
+# false = "ignore this measurement from this sensor"
+#
+# The golden rule: each state element should be measured by AT MOST ONE
+# sensor. Measuring the same thing twice causes the EKF to over-constrain
+# and become overconfident, which is worse than ignoring one sensor.
+#
+#   State index : [ x,     y,     z,
+#                   roll,  pitch, yaw,
+#                   vx,    vy,    vz,
+#                   vroll, vpitch, vyaw,
+#                   ax,    ay,    az  ]
+#
+#   odom0 uses : [ true,  true,  false,   ← x, y from encoder position
+#                   false, false, true,    ← yaw from encoder heading
+#                   true,  false, false,   ← vx from forward speed
+#                   false, false, true,    ← vyaw from turn rate
+#                   false, false, false ]  ← no acceleration from odom
+#
+#   imu0 uses  : [ false, false, false,   ← no position from IMU
+#                   false, false, false,   ← no orientation (drift risk)
+#                   false, false, false,   ← no velocity from IMU
+#                   false, false, true,    ← vyaw from gyroscope ← SHARED INTENTIONALLY
+#                   true,  true,  false ]  ← ax, ay from accelerometer
+#
+# NOTE on vyaw: both odom and IMU report angular velocity. IMU gyroscope is
+# more accurate, so we give imu0 priority. odom0 also has vyaw=true as a
+# backup — the EKF handles this gracefully by treating it as a correlated
+# measurement with a defined covariance.
+# ══════════════════════════════════════════════════════════════════════════
+
+ekf_filter_node:
+  ros__parameters:
+
+    # ── Core settings ──────────────────────────────────────────────────
+    # EKF update rate. Higher = smoother output, more CPU.
+    # 30 Hz matches our LiDAR update rate and robot control loop.
+    frequency: 30.0
+
+    # How long to wait for a sensor before treating it as failed.
+    # 0.1 s = 3 missed updates at 30 Hz before marking sensor stale.
+    sensor_timeout: 0.1
+
+    # Enforce 2D constraints: zero out z, roll, pitch, vy, vz, vroll, vpitch.
+    # ALWAYS true for a ground robot — prevents the EKF drifting into 3D.
+    two_d_mode: true
+
+    # Controls timestamp handling for smoothed output.
+    # 0.0 = output uses the timestamp of the most recent measurement.
+    transform_time_offset: 0.0
+    transform_timeout: 0.0
+
+    # Print detailed covariance info to terminal (useful for debugging).
+    print_diagnostics: true
+    debug: false
+
+    # ── Output settings ────────────────────────────────────────────────
+    # Publish /odometry/filtered (fused odometry topic for Nav2).
+    publish_tf: true
+
+    # Don't publish linear acceleration in the output odometry message.
+    # Nav2 doesn't need it, and it reduces message size.
+    publish_acceleration: false
+
+    # ── Frame IDs (must match URDF and Gazebo plugin) ──────────────────
+    odom_frame:      odom           # odometry origin frame
+    base_link_frame: base_footprint # robot ground projection
+    world_frame:     odom           # EKF operates in the odom frame
+                                     # (map→odom correction is AMCL's job)
+
+    # ── Sensor 0: Wheel Odometry (/odom) ──────────────────────────────
+    # Published by Gazebo's diff_drive plugin.
+    # Provides absolute x, y, yaw position and forward/turn velocity.
+    # Reliable for short distances; drifts over long runs.
+    odom0: /odom
+
+    # State: [x,    y,    z,      roll,  pitch, yaw,
+    #         vx,   vy,   vz,     vroll, vpitch,vyaw,
+    #         ax,   ay,   az]
+    odom0_config: [true,  true,  false,
+                   false, false, true,
+                   true,  false, false,
+                   false, false, true,
+                   false, false, false]
+
+    odom0_queue_size: 10
+
+    # differential: false = use absolute pose from odometry message.
+    # true would mean "integrate velocity to get pose", which adds noise.
+    odom0_differential: false
+
+    # relative: false = use the world frame as reference from the start.
+    odom0_relative: false
+
+    # nodelay: use a low-latency socket for time-critical data.
+    odom0_nodelay: false
+
+    # ── Sensor 1: IMU (/imu/filtered) ─────────────────────────────────
+    # Published by our imu_processor node (Step 2 filtered output).
+    # Provides angular velocity (gyroscope) and linear acceleration.
+    #
+    # We do NOT fuse IMU orientation (yaw) directly.
+    # Reason: IMU yaw has heading drift over time. Using angular velocity
+    # (vyaw) lets the EKF integrate rate changes, which is more stable.
+    imu0: /imu/filtered
+
+    # State: [x,     y,     z,      roll,  pitch, yaw,
+    #         vx,    vy,    vz,     vroll, vpitch,vyaw,
+    #         ax,    ay,    az]
+    imu0_config: [false, false, false,
+                  false, false, false,
+                  false, false, false,
+                  false, false, true,
+                  true,  true,  false]
+
+    imu0_queue_size: 10
+    imu0_differential: false
+
+    # relative: true = treat IMU's first reading as the zero reference.
+    # Required when the IMU doesn't report absolute world-frame orientation.
+    imu0_relative: true
+
+    imu0_nodelay: false
+
+    # IMPORTANT: Remove gravitational acceleration from IMU linear accel.
+    # Without this, the EKF sees a constant ~9.8 m/s² "force" pulling
+    # the robot downward, which corrupts the ax/ay estimates.
+    imu0_remove_gravitational_acceleration: true
+
+    # ── Process Noise Covariance (Q matrix, 15×15 = 225 values) ───────
+    # Controls how much uncertainty the EKF adds to its own state estimate
+    # at each time step (i.e., "how much do I trust my prediction?").
+    #
+    # Larger value = "my prediction is noisy, trust measurements more"
+    # Smaller value = "my prediction is accurate, trust it more"
+    #
+    # Diagonal matrix. Each row/col corresponds to one state element:
+    # Row 0-2:   x, y, z              (position, metres²)
+    # Row 3-5:   roll, pitch, yaw     (orientation, radians²)
+    # Row 6-8:   vx, vy, vz           (linear velocity, (m/s)²)
+    # Row 9-11:  vroll, vpitch, vyaw  (angular velocity, (rad/s)²)
+    # Row 12-14: ax, ay, az           (linear acceleration, (m/s²)²)
+    process_noise_covariance: [
+      0.05,  0.0,   0.0,   0.0,   0.0,   0.0,   0.0,    0.0,   0.0,   0.0,    0.0,   0.0,   0.0,   0.0,   0.0,
+      0.0,   0.05,  0.0,   0.0,   0.0,   0.0,   0.0,    0.0,   0.0,   0.0,    0.0,   0.0,   0.0,   0.0,   0.0,
+      0.0,   0.0,   0.06,  0.0,   0.0,   0.0,   0.0,    0.0,   0.0,   0.0,    0.0,   0.0,   0.0,   0.0,   0.0,
+      0.0,   0.0,   0.0,   0.03,  0.0,   0.0,   0.0,    0.0,   0.0,   0.0,    0.0,   0.0,   0.0,   0.0,   0.0,
+      0.0,   0.0,   0.0,   0.0,   0.03,  0.0,   0.0,    0.0,   0.0,   0.0,    0.0,   0.0,   0.0,   0.0,   0.0,
+      0.0,   0.0,   0.0,   0.0,   0.0,   0.06,  0.0,    0.0,   0.0,   0.0,    0.0,   0.0,   0.0,   0.0,   0.0,
+      0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.025,  0.0,   0.0,   0.0,    0.0,   0.0,   0.0,   0.0,   0.0,
+      0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,    0.025, 0.0,   0.0,    0.0,   0.0,   0.0,   0.0,   0.0,
+      0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,    0.0,   0.04,  0.0,    0.0,   0.0,   0.0,   0.0,   0.0,
+      0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,    0.0,   0.0,   0.01,   0.0,   0.0,   0.0,   0.0,   0.0,
+      0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,    0.0,   0.0,   0.0,    0.01,  0.0,   0.0,   0.0,   0.0,
+      0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,    0.0,   0.0,   0.0,    0.0,   0.02,  0.0,   0.0,   0.0,
+      0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,    0.0,   0.0,   0.0,    0.0,   0.0,   0.01,  0.0,   0.0,
+      0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,    0.0,   0.0,   0.0,    0.0,   0.0,   0.0,   0.01,  0.0,
+      0.0,   0.0,   0.0,   0.0,   0.0,   0.0,   0.0,    0.0,   0.0,   0.0,    0.0,   0.0,   0.0,   0.0,   0.015
+    ]
+
+    # ── Initial Estimate Covariance (P₀ matrix, 15×15 = 225 values) ───
+    # The EKF's confidence in its starting state.
+    # High values = "I'm very uncertain about my initial pose" → EKF
+    # trusts early sensor readings more heavily.
+    # Low values  = "I know exactly where I started" → filters aggressively.
+    #
+    # For a robot spawned at origin in Gazebo, use small values (we know
+    # the starting pose). For a real robot where the start is unknown,
+    # increase the x, y (indices 0,1) and yaw (index 5) values.
+    initial_estimate_covariance: [
+      1.0e-9, 0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,
+      0.0,    1.0e-9, 0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,
+      0.0,    0.0,    1.0e-9, 0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,
+      0.0,    0.0,    0.0,    1.0e-9, 0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,
+      0.0,    0.0,    0.0,    0.0,    1.0e-9, 0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,
+      0.0,    0.0,    0.0,    0.0,    0.0,    1.0e-9, 0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,
+      0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    1.0e-9, 0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,
+      0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    1.0e-9, 0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,
+      0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    1.0e-9, 0.0,    0.0,    0.0,    0.0,    0.0,    0.0,
+      0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    1.0e-9, 0.0,    0.0,    0.0,    0.0,    0.0,
+      0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    1.0e-9, 0.0,    0.0,    0.0,    0.0,
+      0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    1.0e-9, 0.0,    0.0,    0.0,
+      0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    1.0e-9, 0.0,    0.0,
+      0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    1.0e-9, 0.0,
+      0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    0.0,    1.0e-9
+    ]

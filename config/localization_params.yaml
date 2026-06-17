@@ -1,0 +1,171 @@
+# ══════════════════════════════════════════════════════════════════════════
+# config/localization_params.yaml
+# ─────────────────────────────────
+# Parameters for two Nav2 nodes:
+#   • amcl       — Adaptive Monte Carlo Localisation (particle filter)
+#   • map_server — Loads the .pgm + .yaml map saved in Step 3
+#
+# WHAT AMCL DOES
+# ───────────────
+# AMCL answers the question: "Given a known map, where am I right now?"
+#
+# It uses a PARTICLE FILTER — imagine 1000 robot clones all guessing
+# different positions on the map. When a LiDAR scan arrives:
+#   • Clones whose guessed position matches the scan WELL get more weight
+#   • Clones whose position doesn't match the scan die off
+#   • Survivors reproduce — new particles cluster near the good guesses
+#
+# After a few scans, the particle cloud converges to the robot's true pose.
+# The spread of the cloud tells us HOW CERTAIN we are of the location.
+#
+# VS SLAM (Step 3)
+# ─────────────────
+# SLAM:          "I don't have a map — build one while I drive"
+# AMCL:          "I have a map — figure out where I am on it"
+# Both Steps:    "Publish the map→odom TF transform"
+#
+# HOW AMCL AND EKF CONNECT
+# ──────────────────────────
+# EKF  provides: odom → base_footprint  (smooth short-term tracking)
+# AMCL provides: map  → odom            (global position on saved map)
+# Together:      map  → odom → base_footprint → base_link → sensors
+# This is the complete TF chain Nav2 needs to plan and execute paths.
+#
+# SETTING THE INITIAL POSE
+# ─────────────────────────
+# AMCL starts with particles spread across the whole map (global localisation).
+# It converges faster if you give it a hint:
+#   • In RViz2: click "2D Pose Estimate" and click on where the robot is
+#   • Or set set_initial_pose: true and fill in initial_pose below
+# ══════════════════════════════════════════════════════════════════════════
+
+# ── Map Server ─────────────────────────────────────────────────────────────
+# Loads the saved map and publishes it on /map.
+# The yaml_filename is typically overridden at launch time via argument:
+#   ros2 launch ... localization.launch.py map:=/path/to/map.yaml
+map_server:
+  ros__parameters:
+    yaml_filename: ""   # overridden by localization.launch.py map argument
+    topic_name: "map"
+    frame_id: "map"
+
+# ── AMCL ──────────────────────────────────────────────────────────────────
+amcl:
+  ros__parameters:
+
+    # ── Robot motion model ───────────────────────────────────────────────
+    # DifferentialMotionModel: correct for our two-wheel diff drive.
+    # Alternatives: OmniMotionModel (holonomic robots like mecanum wheels).
+    robot_model_type: "nav2_amcl::DifferentialMotionModel"
+
+    # ── Particle filter size ─────────────────────────────────────────────
+    # min_particles: minimum even when highly confident (prevents collapse)
+    # max_particles: cap to control CPU usage during uncertain localisation
+    #
+    # Increase max_particles for large or complex maps.
+    # Decrease both for faster convergence in simple environments.
+    min_particles: 500
+    max_particles: 2000
+
+    # KLD sampling parameters: controls how many particles are needed
+    # based on the statistical error of the current estimate.
+    # pf_err: allowable error between true distribution and estimate
+    # pf_z:   upper standard normal quantile for (1 − delta) confidence
+    pf_err: 0.05
+    pf_z: 0.99
+
+    # ── Resampling policy ────────────────────────────────────────────────
+    # Resample every N filter updates. 1 = resample every scan.
+    # Increase to 2-3 to reduce particle impoverishment (loss of diversity).
+    resample_interval: 1
+
+    # Alpha-slow / alpha-fast: detect when the filter is doing poorly
+    # (particle set has low likelihood) and inject random particles.
+    # This is "recovery" — it prevents permanent loss of localisation.
+    recovery_alpha_slow: 0.001  # long-term average weight (slow tracker)
+    recovery_alpha_fast: 0.1    # short-term average weight (fast tracker)
+
+    # ── When to run the filter ───────────────────────────────────────────
+    # Only update when the robot has moved enough — prevents burning CPU
+    # on redundant filter updates while the robot stands still.
+    update_min_d: 0.25   # metres: update after moving at least 25 cm
+    update_min_a: 0.2    # radians ≈ 11.5°: update after rotating this much
+
+    # ── Laser sensor model: likelihood field ─────────────────────────────
+    # "likelihood_field" is faster and more accurate than "beam" for
+    # indoor environments. It treats each laser endpoint as a Gaussian
+    # blurred around the nearest occupied cell in the map.
+    laser_model_type: "likelihood_field"
+
+    # Range limits — must match sensors.yaml range_max / range_min.
+    laser_max_range: 3.5     # metres
+    laser_min_range: 0.12    # metres
+
+    # Maximum distance to search for a matching map obstacle.
+    # Larger = slower but handles sensor noise better.
+    laser_likelihood_max_dist: 2.0   # metres
+
+    # Beam count: number of evenly-spaced laser beams to use from the scan.
+    # We have 360 beams; using 60 reduces CPU without sacrificing accuracy.
+    # Increase to 120 for large/complex maps.
+    max_beams: 60
+
+    # ── Laser likelihood model weights ───────────────────────────────────
+    # z_hit:  probability that a reading reflects a real obstacle
+    # z_rand: probability that a reading is random noise / reflection
+    # Must sum to ≤ 1.0. Leftover goes to z_max (out-of-range readings).
+    z_hit:    0.5   # 50% of readings are genuine obstacle reflections
+    z_rand:   0.5   # 50% are noise (conservative for simulation)
+
+    # Standard deviation of the Gaussian around each hit point.
+    # Increase for noisier real-world sensors.
+    sigma_hit: 0.2   # metres
+
+    # ── Differential drive motion model noise ────────────────────────────
+    # These four alpha values model how much the robot's actual motion
+    # deviates from what the encoders report.
+    #
+    # alpha1: extra rotation noise caused by rotation  (drift while spinning)
+    # alpha2: extra rotation noise caused by translation (veering off-course)
+    # alpha3: extra translation noise from translation   (slip while driving)
+    # alpha4: extra translation noise from rotation       (radius error)
+    #
+    # Simulation: lower noise (0.2) since wheels don't slip in Gazebo.
+    # Real hardware: start at 0.5 and tune by driving a known distance.
+    alpha1: 0.2
+    alpha2: 0.2
+    alpha3: 0.2
+    alpha4: 0.2
+
+    # ── Frame and topic IDs ──────────────────────────────────────────────
+    # These MUST match the URDF (Step 1), SLAM params (Step 3), and
+    # EKF params above. A single frame name mismatch breaks the TF chain.
+    base_frame_id:   "base_footprint"
+    global_frame_id: "map"
+    odom_frame_id:   "odom"
+
+    # The filtered scan from Step 2 — same topic SLAM uses.
+    scan_topic: /scan/filtered
+
+    # ── TF and timing ───────────────────────────────────────────────────
+    # Maximum age of a TF transform AMCL will accept.
+    # Increase if you see "TF extrapolation into the future" warnings.
+    transform_tolerance: 1.0   # seconds
+
+    # ── Initial pose ──────────────────────────────────────────────────────
+    # set_initial_pose: true — skip global localisation and start the
+    # particle cloud tightly around this pose.
+    # Only set this if you know EXACTLY where the robot starts on the map.
+    # Otherwise use the "2D Pose Estimate" button in RViz2.
+    set_initial_pose: false
+    initial_pose:
+      x:   0.0
+      y:   0.0
+      z:   0.0
+      yaw: 0.0   # radians
+
+    # ── Save and load pose across restarts ───────────────────────────────
+    # Saves the last known pose to a file so AMCL can restart quickly
+    # without running global localisation again.
+    save_pose_rate: 0.5          # Hz — how often to write pose to disk
+    pose_save_path: ""           # empty = use default ROS 2 location

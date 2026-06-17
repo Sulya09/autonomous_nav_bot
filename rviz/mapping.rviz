@@ -1,0 +1,245 @@
+# rviz/mapping.rviz
+# ══════════════════
+# RViz2 configuration for the SLAM mapping session.
+#
+# What you see:
+#   • The growing occupancy grid (black/grey/white cells)
+#   • Live orange LiDAR scan overlaid on the map
+#   • The robot model at its current estimated position
+#   • TF frames for debugging coordinate frame issues
+#   • The robot's path drawn as a line (breadcrumb trail)
+#
+# Fixed Frame is "map" because during SLAM the map frame IS the global
+# reference — everything is drawn relative to where slam_toolbox
+# believes it has been.
+#
+# Note: The laser scan may flash/jump slightly when a loop closure occurs.
+# That is NORMAL — slam_toolbox is correcting the map's accumulated drift.
+
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+    Property Tree Widget:
+      Expanded:
+        - /Map1
+        - /LaserScan1
+        - /RobotModel1
+      Splitter Ratio: 0.6
+    Tree Height: 600
+  - Class: rviz_common/Selection
+    Name: Selection
+  - Class: rviz_common/Tool Properties
+    Expanded:
+      - /2D Pose Estimate1
+    Name: Tool Properties
+  - Class: rviz_common/Views
+    Name: Views
+    Splitter Ratio: 0.5
+
+Visualization Manager:
+  Class: ""
+  Displays:
+
+    # ── Floor reference grid ────────────────────────────────────────
+    - Alpha: 0.3
+      Cell Size: 1.0          # 1 m grid — matches ROS navigation convention
+      Class: rviz_default_plugins/Grid
+      Color: 100; 100; 100
+      Enabled: true
+      Name: Grid
+      Plane: XY
+      Plane Cell Count: 20
+      Reference Frame: map
+      Value: true
+
+    # ── SLAM Occupancy Grid (the MAP being built) ───────────────────
+    # This is the main visual output of SLAM Toolbox.
+    # Updates at roughly 1 Hz as slam_toolbox processes new scans.
+    #
+    # Color scheme (default):
+    #   Grey  (value 205) = unknown/unexplored
+    #   White (value 254) = free space
+    #   Black (value   0) = occupied (walls)
+    - Class: rviz_default_plugins/Map
+      Alpha: 0.85            # slightly transparent so laser shows through
+      Color Scheme: map      # use the standard occupancy grid color scheme
+      Draw Behind: false
+      Enabled: true
+      Name: Map
+      Topic:
+        Depth: 1
+        Durability Policy: Transient Local  # receive the last map even if we join late
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /map
+      Update Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Weak Reliable
+        Value: /map_updates
+      Value: true
+      Use Timestamp: false
+
+    # ── Live LiDAR Scan ────────────────────────────────────────────
+    # Drawn on TOP of the map so you can see which walls the laser
+    # is currently measuring vs what's already been mapped.
+    - Class: rviz_default_plugins/LaserScan
+      Color: 255; 100; 0      # bright orange
+      Color Transformer: FlatColor
+      Enabled: true
+      Name: LaserScan
+      Size (m): 0.03
+      Style: Squares
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Best Effort
+        Value: /scan/filtered  # filtered scan — same one SLAM reads
+      Value: true
+
+    # ── Robot 3D model ─────────────────────────────────────────────
+    - Alpha: 1
+      Class: rviz_default_plugins/RobotModel
+      Description Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /robot_description
+      Enabled: true
+      Name: RobotModel
+      Value: true
+      Visual Enabled: true
+      Collision Enabled: false
+
+    # ── TF Coordinate Frames ───────────────────────────────────────
+    # During SLAM, watch for the map→odom transform being published.
+    # If TF is missing, slam_toolbox isn't running or has lost tracking.
+    - Class: rviz_default_plugins/TF
+      Enabled: true
+      Frame Timeout: 15
+      Frames:
+        All Enabled: true
+      Marker Scale: 0.2
+      Name: TF
+      Show Arrows: false        # hide arrows for cleaner map view
+      Show Axes: true
+      Show Names: false         # hide names to reduce clutter
+      Value: true
+
+    # ── Robot Path (breadcrumb trail) ──────────────────────────────
+    # Draws the robot's trajectory so you can see which areas have
+    # been explored. Helps identify gaps in coverage.
+    - Class: rviz_default_plugins/Path
+      Buffer Length: 1
+      Color: 25; 255; 0         # bright green
+      Enabled: true
+      Head Diameter: 0.10
+      Head Length: 0.07
+      Length: 0.30
+      Line Style: Lines
+      Line Width: 0.03
+      Name: Path
+      Offset:
+        X: 0
+        Y: 0
+        Z: 0
+      Pose Color: 255; 85; 255
+      Pose Style: None
+      Radius: 0.03
+      Shaft Diameter: 0.05
+      Shaft Length: 0.10
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /slam_toolbox/scan_visualization   # SLAM's internal path topic
+      Value: true
+
+    # ── Pose estimate display (for initial pose setting) ──────────
+    # Not used during mapping, but useful if you want to test
+    # where AMCL would initialise in the next step.
+    - Class: rviz_default_plugins/PoseWithCovariance
+      Axes Length: 0.3
+      Axes Radius: 0.01
+      Covariance:
+        Orientation:
+          Alpha: 0.5
+          Color: 255; 255; 127
+          Color Style: Unique
+          Frame: Local
+          Offset: 1
+          Scale: 1
+          Value: true
+        Position:
+          Alpha: 0.3
+          Color: 204; 51; 204
+          Scale: 1
+          Value: true
+        Value: true
+      Enabled: true
+      Head Radius: 0.05
+      Head Length: 0.05
+      Name: PoseEstimate
+      Shaft Radius: 0.01
+      Shaft Length: 0.30
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /pose
+      Value: true
+
+  Enabled: true
+
+  Global Options:
+    Background Color: 25; 25; 25     # near-black background makes map clearer
+    Fixed Frame: map                  # CRITICAL: must be "map" during SLAM
+    Frame Rate: 20                    # lower than 30 to save CPU for SLAM solver
+
+  Name: root
+
+  Tools:
+    - Class: rviz_default_plugins/Interact
+      Hide Inactive: false
+    - Class: rviz_default_plugins/MoveCamera
+    - Class: rviz_default_plugins/Select
+    - Class: rviz_default_plugins/FocusCamera
+
+    # 2D Pose Estimate: click on the map to manually correct robot pose.
+    # Used in Step 4 (AMCL). Also useful if SLAM loses tracking.
+    - Class: rviz_default_plugins/SetInitialPose
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /initialpose
+
+    # 2D Goal Pose: unused during mapping, but handy for quick Nav2 tests
+    - Class: rviz_default_plugins/SetGoal
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /goal_pose
+
+  Value: true
+
+  Views:
+    Current:
+      Class: rviz_default_plugins/TopDownOrtho   # top-down is best for 2D maps
+      Scale: 40                  # zoom level (pixels per metre)
+      Angle: 0                   # rotation of the view
+      X: 0                       # pan position
+      Y: 0
+      Name: Current View
+      Near Clip Distance: 0.01
+      Target Frame: <Fixed Frame>
+      Value: TopDownOrtho (rviz)
+    Saved: ~

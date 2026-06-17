@@ -1,0 +1,246 @@
+<?xml version="1.0"?>
+<!--
+  gazebo.xacro
+  ────────────
+  Gazebo-specific simulation settings. This file has two jobs:
+
+  1. MATERIALS: Tell Gazebo what color each link should be (separate
+     from RViz2 materials — Gazebo has its own rendering engine).
+
+  2. PLUGINS: Attach software modules to the robot that simulate:
+       • The differential drive controller  → responds to /cmd_vel
+       • The 2D LiDAR scanner              → publishes /scan
+       • The RGB camera                    → publishes /camera/image_raw
+       • The IMU                           → publishes /imu
+
+  Without these plugins, the robot would appear in Gazebo but have
+  no sensors and wouldn't move when you send velocity commands.
+-->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       GAZEBO MATERIALS
+       Gazebo ignores the <material> tags from materials.xacro, so
+       we duplicate color assignments here using Gazebo's own names.
+  ═══════════════════════════════════════════════════════════════════ -->
+
+  <gazebo reference="base_link">
+    <material>Gazebo/DarkGrey</material>
+  </gazebo>
+
+  <gazebo reference="left_wheel_link">
+    <material>Gazebo/Black</material>
+    <!-- High friction keeps wheels gripping the floor instead of sliding -->
+    <mu1>1.5</mu1>
+    <mu2>1.5</mu2>
+    <kp>1e6</kp>   <!-- Contact stiffness -->
+    <kd>1.0</kd>   <!-- Contact damping -->
+  </gazebo>
+
+  <gazebo reference="right_wheel_link">
+    <material>Gazebo/Black</material>
+    <mu1>1.5</mu1>
+    <mu2>1.5</mu2>
+    <kp>1e6</kp>
+    <kd>1.0</kd>
+  </gazebo>
+
+  <gazebo reference="front_caster_link">
+    <material>Gazebo/Grey</material>
+    <!-- Near-zero friction: casters must swivel freely in any direction -->
+    <mu1>0.001</mu1>
+    <mu2>0.001</mu2>
+  </gazebo>
+
+  <gazebo reference="rear_caster_link">
+    <material>Gazebo/Grey</material>
+    <mu1>0.001</mu1>
+    <mu2>0.001</mu2>
+  </gazebo>
+
+  <gazebo reference="lidar_link">
+    <material>Gazebo/Blue</material>
+  </gazebo>
+
+  <gazebo reference="camera_link">
+    <material>Gazebo/Blue</material>
+  </gazebo>
+
+  <gazebo reference="imu_link">
+    <material>Gazebo/Green</material>
+  </gazebo>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       PLUGIN 1: DIFFERENTIAL DRIVE CONTROLLER
+       ─────────────────────────────────────────
+       This plugin makes the robot drivable. It:
+         • Listens on /cmd_vel for geometry_msgs/Twist commands
+         • Converts linear.x and angular.z into left/right wheel speeds
+         • Computes odometry from wheel rotations
+         • Publishes /odom (nav_msgs/Odometry)
+         • Broadcasts the odom → base_footprint TF transform
+       
+       Think of it as the "motor controller + wheel encoder" combo.
+  ═══════════════════════════════════════════════════════════════════ -->
+  <gazebo>
+    <plugin name="diff_drive_controller" filename="libgazebo_ros_diff_drive.so">
+
+      <!-- Which joints to drive (must match URDF joint names exactly) -->
+      <left_joint>left_wheel_joint</left_joint>
+      <right_joint>right_wheel_joint</right_joint>
+
+      <!-- Physical wheel dimensions — MUST match the URDF values exactly.
+           If these differ from the URDF, odometry will be wrong. -->
+      <wheel_separation>0.34</wheel_separation>   <!-- center-to-center, meters -->
+      <wheel_diameter>0.10</wheel_diameter>        <!-- 2 × wheel_radius, meters -->
+
+      <!-- Torque and speed limits protect the simulation from exploding -->
+      <max_wheel_torque>10.0</max_wheel_torque>         <!-- Newton·meters -->
+      <max_wheel_acceleration>2.0</max_wheel_acceleration> <!-- rad/s² -->
+
+      <!-- ROS topic and frame names -->
+      <command_topic>cmd_vel</command_topic>
+      <odometry_topic>odom</odometry_topic>
+      <odometry_frame>odom</odometry_frame>
+      <robot_base_frame>base_footprint</robot_base_frame>
+
+      <!-- What to publish -->
+      <publish_odom>true</publish_odom>
+      <publish_odom_tf>true</publish_odom_tf>
+      <publish_wheel_tf>false</publish_wheel_tf>  <!-- Joint states handle this -->
+
+      <update_rate>30.0</update_rate>  <!-- Hz -->
+    </plugin>
+  </gazebo>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       PLUGIN 2: 2D LIDAR (LaserScan)
+       ────────────────────────────────
+       Simulates a spinning laser rangefinder like the RPLIDAR A1.
+       It casts 360 virtual rays outward and measures the distance
+       to whatever they hit. Publishes sensor_msgs/LaserScan on /scan.
+       
+       Nav2 and SLAM_Toolbox read /scan to understand the environment.
+  ═══════════════════════════════════════════════════════════════════ -->
+  <gazebo reference="lidar_link">
+    <sensor name="lidar_sensor" type="ray">
+      <always_on>true</always_on>
+      <visualize>true</visualize>  <!-- Show the scan rays in Gazebo GUI -->
+      <update_rate>10</update_rate>  <!-- 10 Hz scan rate (typical for A1) -->
+
+      <ray>
+        <scan>
+          <horizontal>
+            <samples>360</samples>         <!-- One ray per degree -->
+            <resolution>1</resolution>     <!-- Step multiplier (keep at 1) -->
+            <min_angle>-3.14159</min_angle>  <!-- Full 360° sweep -->
+            <max_angle>3.14159</max_angle>
+          </horizontal>
+        </scan>
+        <range>
+          <min>0.12</min>   <!-- 12 cm dead zone (real LiDARs have a blind spot) -->
+          <max>3.5</max>    <!-- 3.5 m max range (RPLIDAR A1 spec) -->
+          <resolution>0.01</resolution>
+        </range>
+        <!-- Add realistic Gaussian noise to mimic a real sensor -->
+        <noise>
+          <type>gaussian</type>
+          <mean>0.0</mean>
+          <stddev>0.01</stddev>  <!-- ±1 cm standard deviation -->
+        </noise>
+      </ray>
+
+      <plugin name="lidar_plugin" filename="libgazebo_ros_ray_sensor.so">
+        <ros>
+          <!-- Remap internal topic name to the ROS standard /scan -->
+          <remapping>~/out:=scan</remapping>
+        </ros>
+        <output_type>sensor_msgs/LaserScan</output_type>
+        <frame_name>lidar_link</frame_name>
+      </plugin>
+    </sensor>
+  </gazebo>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       PLUGIN 3: RGB CAMERA
+       ──────────────────────
+       Simulates a standard USB camera (like a Logitech webcam).
+       Publishes sensor_msgs/Image on /camera/image_raw and
+       sensor_msgs/CameraInfo on /camera/camera_info.
+       
+       Used for visual odometry and object detection in later steps.
+  ═══════════════════════════════════════════════════════════════════ -->
+  <gazebo reference="camera_link">
+    <sensor name="camera_sensor" type="camera">
+      <always_on>true</always_on>
+      <visualize>true</visualize>
+      <update_rate>30</update_rate>  <!-- 30 fps, like a standard webcam -->
+
+      <camera>
+        <horizontal_fov>1.3962634</horizontal_fov>  <!-- 80° field of view -->
+        <image>
+          <width>640</width>
+          <height>480</height>
+          <format>R8G8B8</format>  <!-- Standard 24-bit RGB -->
+        </image>
+        <clip>
+          <near>0.02</near>   <!-- Objects closer than 2cm are invisible -->
+          <far>300</far>      <!-- Max render distance in meters -->
+        </clip>
+        <noise>
+          <type>gaussian</type>
+          <mean>0.0</mean>
+          <stddev>0.007</stddev>  <!-- Subtle image noise, like real cameras -->
+        </noise>
+      </camera>
+
+      <plugin name="camera_plugin" filename="libgazebo_ros_camera.so">
+        <!-- Use the optical frame so images follow ROS REP-103 conventions -->
+        <frame_name>camera_optical_link</frame_name>
+        <hack_baseline>0.0</hack_baseline>  <!-- 0 = monocular (not stereo) -->
+      </plugin>
+    </sensor>
+  </gazebo>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       PLUGIN 4: IMU (Inertial Measurement Unit)
+       ──────────────────────────────────────────
+       Simulates a 6-DOF IMU chip like the MPU-6050.
+       Measures angular velocity (gyroscope) and linear acceleration
+       (accelerometer). Publishes sensor_msgs/Imu on /imu.
+       
+       robot_localization (Step 4) fuses IMU + odometry for better
+       pose estimates, especially when wheels slip.
+  ═══════════════════════════════════════════════════════════════════ -->
+  <gazebo reference="imu_link">
+    <sensor name="imu_sensor" type="imu">
+      <always_on>true</always_on>
+      <update_rate>100</update_rate>  <!-- 100 Hz — IMUs are fast sensors -->
+
+      <imu>
+        <!-- Gyroscope noise (angular velocity, radians/sec) -->
+        <angular_velocity>
+          <x><noise type="gaussian"><mean>0.0</mean><stddev>0.009</stddev></noise></x>
+          <y><noise type="gaussian"><mean>0.0</mean><stddev>0.009</stddev></noise></y>
+          <z><noise type="gaussian"><mean>0.0</mean><stddev>0.009</stddev></noise></z>
+        </angular_velocity>
+        <!-- Accelerometer noise (linear acceleration, m/s²) -->
+        <linear_acceleration>
+          <x><noise type="gaussian"><mean>0.0</mean><stddev>0.021</stddev></noise></x>
+          <y><noise type="gaussian"><mean>0.0</mean><stddev>0.021</stddev></noise></y>
+          <z><noise type="gaussian"><mean>0.0</mean><stddev>0.021</stddev></noise></z>
+        </linear_acceleration>
+      </imu>
+
+      <plugin name="imu_plugin" filename="libgazebo_ros_imu_sensor.so">
+        <ros>
+          <remapping>~/out:=imu</remapping>
+        </ros>
+        <!-- Don't lock to Gazebo's world frame — report relative changes -->
+        <initial_orientation_as_reference>false</initial_orientation_as_reference>
+        <frame_name>imu_link</frame_name>
+      </plugin>
+    </sensor>
+  </gazebo>
+
+</robot>

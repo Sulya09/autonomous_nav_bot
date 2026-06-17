@@ -1,0 +1,375 @@
+<?xml version="1.0"?>
+<!--
+  robot.urdf.xacro — Main Robot Description
+  ══════════════════════════════════════════
+  This is the master file that describes every physical part of the robot.
+  It is written in XACRO (XML + Macros), which is a superset of URDF that
+  adds variables, math, and reusable macros so we don't repeat ourselves.
+
+  At build/launch time, the ROS 2 tool "xacro" processes this file and
+  produces a pure URDF string, which robot_state_publisher then reads to
+  broadcast TF (coordinate frame) transforms for every link.
+
+  ── ROBOT OVERVIEW ────────────────────────────────────────────────────────
+  Layout (top-down view):
+
+        [front]
+    ○           ○     ← front caster (passive)
+   ═══════════════
+  ║  [cam]  [imu] ║
+  ║    [LIDAR]    ║
+  ║               ║
+   ═══════════════
+    ○           ○     ← rear caster (passive)
+  ⊙               ⊙  ← left/right drive wheels (motorised)
+        [rear]
+
+  ── COORDINATE FRAME HEIGHTS (world Z) ───────────────────────────────────
+   0.00 m  → floor / base_footprint
+   0.05 m  → base_link  (wheel axle height = wheel_radius)
+   0.00 m  → wheel bottom touches floor ✓
+   0.025 m → caster center (caster_radius), bottom at 0.00 m ✓
+   0.05 m  → chassis bottom (at axle height, above casters) ✓
+   0.15 m  → chassis top
+   0.22 m  → LiDAR centre (7 cm above chassis top)
+   0.15 m  → camera centre (front face of chassis)
+
+  ── TF TREE ──────────────────────────────────────────────────────────────
+  map
+   └─ odom                     (published by diff_drive Gazebo plugin)
+       └─ base_footprint        (virtual ground projection)
+           └─ base_link         (chassis centre at axle height)
+               ├─ left_wheel_link
+               ├─ right_wheel_link
+               ├─ front_caster_link
+               ├─ rear_caster_link
+               ├─ lidar_link
+               ├─ camera_link
+               │   └─ camera_optical_link
+               └─ imu_link
+-->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="autonomous_nav_bot">
+
+  <!-- ── Include helper files ─────────────────────────────────────────── -->
+  <!-- $(find pkg) resolves to the installed share directory of the package -->
+  <xacro:include filename="$(find autonomous_nav_bot)/urdf/materials.xacro"/>
+  <xacro:include filename="$(find autonomous_nav_bot)/urdf/gazebo.xacro"/>
+
+  <!-- ════════════════════════════════════════════════════════════════════
+       ROBOT PARAMETERS
+       Change these values to resize the robot — all geometry below
+       is derived from them mathematically, nothing is hard-coded.
+  ════════════════════════════════════════════════════════════════════════ -->
+
+  <!-- Chassis (the main body box) -->
+  <xacro:property name="chassis_length" value="0.40"/>  <!-- metres, front-to-back -->
+  <xacro:property name="chassis_width"  value="0.30"/>  <!-- metres, left-to-right -->
+  <xacro:property name="chassis_height" value="0.10"/>  <!-- metres, top-to-bottom -->
+  <xacro:property name="chassis_mass"   value="5.0"/>   <!-- kg -->
+
+  <!-- Drive wheels (two motorised wheels on the sides) -->
+  <xacro:property name="wheel_radius"     value="0.05"/>  <!-- metres -->
+  <xacro:property name="wheel_width"      value="0.04"/>  <!-- metres (axle depth) -->
+  <xacro:property name="wheel_mass"       value="0.5"/>   <!-- kg -->
+  <!-- Separation = chassis_width + one wheel_width on each side -->
+  <xacro:property name="wheel_separation" value="${chassis_width + wheel_width}"/>  <!-- 0.34 m -->
+
+  <!-- Caster wheels (passive ball-casters for stability) -->
+  <xacro:property name="caster_radius" value="0.025"/>  <!-- metres — half of wheel_radius -->
+  <xacro:property name="caster_mass"   value="0.1"/>    <!-- kg -->
+
+  <!-- ════════════════════════════════════════════════════════════════════
+       INERTIA MACROS
+       Inertia tensors tell the physics engine how mass is distributed
+       in an object, which affects how it rotates under force.
+       Standard formulas for simple geometric shapes:
+  ════════════════════════════════════════════════════════════════════════ -->
+
+  <!-- Box inertia (chassis, camera, IMU) -->
+  <xacro:macro name="box_inertia" params="mass x y z">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="${mass}"/>
+      <inertia
+        ixx="${(1/12) * mass * (y*y + z*z)}" ixy="0.0" ixz="0.0"
+        iyy="${(1/12) * mass * (x*x + z*z)}" iyz="0.0"
+        izz="${(1/12) * mass * (x*x + y*y)}"/>
+    </inertial>
+  </xacro:macro>
+
+  <!-- Cylinder inertia (wheels, LiDAR) — axis along Z before any rotation -->
+  <xacro:macro name="cylinder_inertia" params="mass r h">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="${mass}"/>
+      <inertia
+        ixx="${(1/12) * mass * (3*r*r + h*h)}" ixy="0.0" ixz="0.0"
+        iyy="${(1/12) * mass * (3*r*r + h*h)}" iyz="0.0"
+        izz="${(1/2)  * mass * r*r}"/>
+    </inertial>
+  </xacro:macro>
+
+  <!-- Sphere inertia (caster balls) -->
+  <xacro:macro name="sphere_inertia" params="mass r">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="${mass}"/>
+      <inertia
+        ixx="${(2/5) * mass * r*r}" ixy="0.0" ixz="0.0"
+        iyy="${(2/5) * mass * r*r}" iyz="0.0"
+        izz="${(2/5) * mass * r*r}"/>
+    </inertial>
+  </xacro:macro>
+
+  <!-- ════════════════════════════════════════════════════════════════════
+       BASE FOOTPRINT
+       A virtual (massless, invisible) link that sits at ground level
+       directly below the robot centre. Nav2 and AMCL require this link
+       to exist — it is the frame they use to track the robot's 2D pose.
+  ════════════════════════════════════════════════════════════════════════ -->
+  <link name="base_footprint"/>
+
+  <!--
+    Lift base_link up to axle height (wheel_radius = 0.05 m).
+    This means base_link is at the height of the wheel centres —
+    wheels go downward from here to touch the floor.
+  -->
+  <joint name="base_footprint_joint" type="fixed">
+    <parent link="base_footprint"/>
+    <child  link="base_link"/>
+    <origin xyz="0 0 ${wheel_radius}" rpy="0 0 0"/>
+  </joint>
+
+  <!-- ════════════════════════════════════════════════════════════════════
+       CHASSIS  (base_link)
+       The main rectangular body of the robot. Its visual and collision
+       geometry is offset upward by chassis_height/2 so that the bottom
+       of the chassis sits exactly at the wheel-axle height (world Z=0.05m),
+       leaving clear space underneath for the caster balls.
+  ════════════════════════════════════════════════════════════════════════ -->
+  <link name="base_link">
+
+    <!-- Visual: what you see in RViz2 / Gazebo -->
+    <visual>
+      <!-- Shift the box up so its BOTTOM aligns with base_link origin -->
+      <origin xyz="0 0 ${chassis_height/2}" rpy="0 0 0"/>
+      <geometry>
+        <box size="${chassis_length} ${chassis_width} ${chassis_height}"/>
+      </geometry>
+      <material name="dark_gray"/>
+    </visual>
+
+    <!-- Collision: simplified shape used by the physics engine for contacts -->
+    <collision>
+      <origin xyz="0 0 ${chassis_height/2}" rpy="0 0 0"/>
+      <geometry>
+        <box size="${chassis_length} ${chassis_width} ${chassis_height}"/>
+      </geometry>
+    </collision>
+
+    <!-- Inertia: centred on the chassis visual, not on base_link origin -->
+    <inertial>
+      <origin xyz="0 0 ${chassis_height/2}" rpy="0 0 0"/>
+      <mass value="${chassis_mass}"/>
+      <inertia
+        ixx="${(1/12)*chassis_mass*(chassis_width*chassis_width + chassis_height*chassis_height)}"
+        ixy="0.0" ixz="0.0"
+        iyy="${(1/12)*chassis_mass*(chassis_length*chassis_length + chassis_height*chassis_height)}"
+        iyz="0.0"
+        izz="${(1/12)*chassis_mass*(chassis_length*chassis_length + chassis_width*chassis_width)}"/>
+    </inertial>
+
+  </link>
+
+  <!-- ════════════════════════════════════════════════════════════════════
+       DRIVE WHEEL MACRO
+       Reused for both left and right wheels — only the Y offset differs.
+       Wheels are cylinders rotated 90° so they roll along X (forward).
+       Joint type "continuous" = can spin forever (no position limits).
+  ════════════════════════════════════════════════════════════════════════ -->
+  <xacro:macro name="drive_wheel" params="name y_offset">
+
+    <link name="${name}_wheel_link">
+      <visual>
+        <!-- rpy="${pi/2} 0 0" rotates the cylinder so it lies on its side -->
+        <origin xyz="0 0 0" rpy="${pi/2} 0 0"/>
+        <geometry>
+          <cylinder radius="${wheel_radius}" length="${wheel_width}"/>
+        </geometry>
+        <material name="black"/>
+      </visual>
+      <collision>
+        <origin xyz="0 0 0" rpy="${pi/2} 0 0"/>
+        <geometry>
+          <cylinder radius="${wheel_radius}" length="${wheel_width}"/>
+        </geometry>
+      </collision>
+      <xacro:cylinder_inertia mass="${wheel_mass}"
+                              r="${wheel_radius}" h="${wheel_width}"/>
+    </link>
+
+    <!--
+      Joint origin: x=0 (centre of chassis), y=±offset, z=0 (axle level).
+      axis xyz="0 1 0" means the wheel spins around the Y-axis.
+    -->
+    <joint name="${name}_wheel_joint" type="continuous">
+      <parent link="base_link"/>
+      <child  link="${name}_wheel_link"/>
+      <origin xyz="0 ${y_offset} 0" rpy="0 0 0"/>
+      <axis xyz="0 1 0"/>
+      <limit effort="10.0" velocity="5.0"/>     <!-- N·m, rad/s -->
+      <dynamics damping="0.1" friction="0.1"/>  <!-- light friction for realism -->
+    </joint>
+
+  </xacro:macro>
+
+  <!-- Instantiate left wheel (+Y side) and right wheel (−Y side) -->
+  <xacro:drive_wheel name="left"  y_offset="${ chassis_width/2 + wheel_width/2}"/>
+  <xacro:drive_wheel name="right" y_offset="${-(chassis_width/2 + wheel_width/2)}"/>
+
+  <!-- ════════════════════════════════════════════════════════════════════
+       CASTER WHEEL MACRO
+       Passive support wheels — no motor, fixed joint so they don't tilt.
+       Positioned with z = caster_radius − wheel_radius so their bottom
+       sits exactly at floor level (world Z = 0).
+       Near-zero friction in gazebo.xacro lets them swivel freely.
+  ════════════════════════════════════════════════════════════════════════ -->
+  <xacro:macro name="caster_wheel" params="name x_offset">
+
+    <link name="${name}_caster_link">
+      <visual>
+        <geometry>
+          <sphere radius="${caster_radius}"/>
+        </geometry>
+        <material name="light_gray"/>
+      </visual>
+      <collision>
+        <geometry>
+          <sphere radius="${caster_radius}"/>
+        </geometry>
+      </collision>
+      <xacro:sphere_inertia mass="${caster_mass}" r="${caster_radius}"/>
+    </link>
+
+    <joint name="${name}_caster_joint" type="fixed">
+      <parent link="base_link"/>
+      <child  link="${name}_caster_link"/>
+      <!--
+        z = caster_radius − wheel_radius = 0.025 − 0.05 = −0.025 m
+        In world frame: 0.05 + (−0.025) = 0.025 m = caster_radius → bottom at 0 ✓
+      -->
+      <origin xyz="${x_offset} 0 ${caster_radius - wheel_radius}" rpy="0 0 0"/>
+    </joint>
+
+  </xacro:macro>
+
+  <!-- Casters at front and rear corners of the chassis floor.
+       name="front" → link becomes "front_caster_link" (not "front_caster_caster_link") -->
+  <xacro:caster_wheel name="front"
+    x_offset="${ chassis_length/2 - caster_radius * 2}"/>
+  <xacro:caster_wheel name="rear"
+    x_offset="${-(chassis_length/2 - caster_radius * 2)}"/>
+
+  <!-- ════════════════════════════════════════════════════════════════════
+       LIDAR
+       Mounted centrally on top of the chassis. The laser beam sweeps
+       in the horizontal plane at this height. SLAM and obstacle
+       avoidance depend on this sensor's /scan topic.
+  ════════════════════════════════════════════════════════════════════════ -->
+  <link name="lidar_link">
+    <visual>
+      <!-- Cylinder standing upright (no rpy needed — default axis is Z) -->
+      <geometry>
+        <cylinder radius="0.04" length="0.04"/>
+      </geometry>
+      <material name="blue"/>
+    </visual>
+    <collision>
+      <geometry>
+        <cylinder radius="0.04" length="0.04"/>
+      </geometry>
+    </collision>
+    <xacro:cylinder_inertia mass="0.15" r="0.04" h="0.04"/>
+  </link>
+
+  <!--
+    z = chassis_height + 0.07: 7 cm above the top surface of the chassis
+    (chassis_height puts us at the top, 0.07 is mount + half-sensor height)
+  -->
+  <joint name="lidar_joint" type="fixed">
+    <parent link="base_link"/>
+    <child  link="lidar_link"/>
+    <origin xyz="0 0 ${chassis_height + 0.07}" rpy="0 0 0"/>
+  </joint>
+
+  <!-- ════════════════════════════════════════════════════════════════════
+       CAMERA
+       Mounted on the front face of the chassis at mid-height.
+       Two links are needed:
+         camera_link        — physical housing, aligned with the robot body
+         camera_optical_link — rotated frame for ROS image conventions
+       ROS REP-103 requires camera optical frames to have:
+         Z pointing forward, X pointing right, Y pointing down.
+       The robot body frame has X forward, Y left, Z up — different!
+       The −90° roll + −90° yaw rotation achieves this alignment.
+  ════════════════════════════════════════════════════════════════════════ -->
+  <link name="camera_link">
+    <visual>
+      <geometry>
+        <box size="0.02 0.06 0.02"/>  <!-- thin bar, wide enough for lens -->
+      </geometry>
+      <material name="blue"/>
+    </visual>
+    <collision>
+      <geometry>
+        <box size="0.02 0.06 0.02"/>
+      </geometry>
+    </collision>
+    <xacro:box_inertia mass="0.05" x="0.02" y="0.06" z="0.02"/>
+  </link>
+
+  <joint name="camera_joint" type="fixed">
+    <parent link="base_link"/>
+    <child  link="camera_link"/>
+    <!-- Front face (x = chassis_length/2), mid-height of chassis -->
+    <origin xyz="${chassis_length/2} 0 ${chassis_height/2}" rpy="0 0 0"/>
+  </joint>
+
+  <!-- Optical frame: rotated to match ROS image coordinate conventions -->
+  <link name="camera_optical_link"/>
+  <joint name="camera_optical_joint" type="fixed">
+    <parent link="camera_link"/>
+    <child  link="camera_optical_link"/>
+    <origin xyz="0 0 0" rpy="${-pi/2} 0 ${-pi/2}"/>
+  </joint>
+
+  <!-- ════════════════════════════════════════════════════════════════════
+       IMU (Inertial Measurement Unit)
+       Mounted on the rear-centre of the chassis top.
+       Positioned slightly off-centre (−0.05 m) to avoid being directly
+       under the LiDAR mount so both are accessible.
+       robot_localization (Step 4) fuses IMU + odometry to reduce drift.
+  ════════════════════════════════════════════════════════════════════════ -->
+  <link name="imu_link">
+    <visual>
+      <geometry>
+        <box size="0.03 0.03 0.01"/>  <!-- small PCB-sized chip -->
+      </geometry>
+      <material name="green"/>
+    </visual>
+    <collision>
+      <geometry>
+        <box size="0.03 0.03 0.01"/>
+      </geometry>
+    </collision>
+    <xacro:box_inertia mass="0.02" x="0.03" y="0.03" z="0.01"/>
+  </link>
+
+  <joint name="imu_joint" type="fixed">
+    <parent link="base_link"/>
+    <child  link="imu_link"/>
+    <!-- Top of chassis (z = chassis_height), slightly toward rear -->
+    <origin xyz="-0.05 0 ${chassis_height}" rpy="0 0 0"/>
+  </joint>
+
+</robot>

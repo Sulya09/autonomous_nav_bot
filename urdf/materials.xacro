@@ -1,0 +1,44 @@
+<?xml version="1.0"?>
+<!--
+  materials.xacro
+  ───────────────
+  Defines named colors used by RViz2 to render the robot visually.
+
+  IMPORTANT: These materials are RViz2-only. Gazebo uses its own
+  material system (defined in gazebo.xacro). You need both.
+
+  Usage: <material name="dark_gray"/> inside a <visual> block.
+-->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <material name="black">
+    <color rgba="0.08 0.08 0.08 1.0"/>
+  </material>
+
+  <material name="dark_gray">
+    <color rgba="0.20 0.20 0.20 1.0"/>
+  </material>
+
+  <material name="light_gray">
+    <color rgba="0.70 0.70 0.70 1.0"/>
+  </material>
+
+  <material name="white">
+    <color rgba="0.95 0.95 0.95 1.0"/>
+  </material>
+
+  <!-- Sensor color (LiDAR, camera housing) -->
+  <material name="blue">
+    <color rgba="0.10 0.40 0.80 1.0"/>
+  </material>
+
+  <!-- IMU color -->
+  <material name="green">
+    <color rgba="0.10 0.75 0.20 1.0"/>
+  </material>
+
+  <material name="red">
+    <color rgba="0.80 0.10 0.10 1.0"/>
+  </material>
+
+</robot>

@@ -1,0 +1,249 @@
+# rviz/localization.rviz
+# ════════════════════════
+# RViz2 configuration for the localisation phase.
+#
+# What you see:
+#   1. The loaded occupancy grid (black/white/grey map from Step 3)
+#   2. AMCL particle cloud — a swarm of green arrows, one per hypothesis
+#      • Spread out = uncertain ("I could be anywhere here")
+#      • Tightly clustered = confident ("I know exactly where I am")
+#   3. AMCL pose with covariance ellipse — blue arrow + purple ellipse
+#      The ellipse size shows position uncertainty in metres
+#   4. EKF odometry arrow — shows the fused movement direction
+#   5. Live LiDAR scan — orange dots overlaid on the map
+#   6. Robot 3D model at estimated position
+#
+# WHAT TO DO ON STARTUP
+# ──────────────────────
+# 1. You will see 2000 green arrows scattered across the whole map.
+# 2. Click the "2D Pose Estimate" button (arrow icon, top toolbar).
+# 3. Click + drag on the map where the robot physically is.
+# 4. Watch the particles SNAP to that area and then converge tightly.
+# 5. Once they cluster, AMCL has localised. Confidence ≥ 0.8 is good.
+#
+# Fixed Frame is "map" because localisation defines position ON the map.
+
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+    Property Tree Widget:
+      Expanded:
+        - /Map1
+        - /ParticleCloud1
+        - /AMCLPose1
+      Splitter Ratio: 0.6
+    Tree Height: 650
+  - Class: rviz_common/Selection
+    Name: Selection
+  - Class: rviz_common/Tool Properties
+    Expanded:
+      - /2D Pose Estimate1
+    Name: Tool Properties
+  - Class: rviz_common/Views
+    Name: Views
+
+Visualization Manager:
+  Class: ""
+  Displays:
+
+    # ── Floor reference grid ─────────────────────────────────────────
+    - Alpha: 0.2
+      Cell Size: 1.0
+      Class: rviz_default_plugins/Grid
+      Color: 80; 80; 80
+      Enabled: true
+      Name: Grid
+      Plane: XY
+      Plane Cell Count: 30
+      Reference Frame: map
+      Value: true
+
+    # ── Saved occupancy grid map ─────────────────────────────────────
+    # Loaded from the .pgm / .yaml pair saved in Step 3.
+    # This is the static background map AMCL uses to localise against.
+    - Class: rviz_default_plugins/Map
+      Alpha: 0.7
+      Color Scheme: map
+      Draw Behind: true          # draw first so particles appear on top
+      Enabled: true
+      Name: Map
+      Topic:
+        Depth: 1
+        Durability Policy: Transient Local   # receive map even if we join late
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /map
+      Value: true
+      Use Timestamp: false
+
+    # ── AMCL Particle Cloud ──────────────────────────────────────────
+    # Each arrow is one hypothesis about where the robot could be.
+    # Arrow direction = hypothesised robot heading.
+    # Watch the swarm collapse to the robot's true pose.
+    - Class: rviz_default_plugins/PoseArray
+      Color: 0; 200; 50          # bright green
+      Enabled: true
+      Name: ParticleCloud
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /particle_cloud
+      Value: true
+      Arrow Length: 0.10         # short arrows so the swarm isn't cluttered
+
+    # ── AMCL Pose + Covariance Ellipse ───────────────────────────────
+    # The blue arrow = AMCL's best estimate of the robot's pose.
+    # The purple ellipse = the uncertainty region (2σ position bounds).
+    # Ellipse shrinks as localisation improves.
+    - Class: rviz_default_plugins/PoseWithCovariance
+      Axes Length: 0.4
+      Axes Radius: 0.02
+      Covariance:
+        Orientation:
+          Alpha: 0.5
+          Color: 255; 255; 0     # yellow orientation covariance cone
+          Color Style: Unique
+          Frame: Local
+          Offset: 1
+          Scale: 1
+          Value: true
+        Position:
+          Alpha: 0.4
+          Color: 180; 50; 200    # purple position ellipse
+          Scale: 1
+          Value: true
+        Value: true
+      Enabled: true
+      Head Radius: 0.07
+      Head Length: 0.07
+      Name: AMCLPose
+      Shaft Radius: 0.02
+      Shaft Length: 0.4
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /amcl_pose
+      Value: true
+
+    # ── EKF Fused Odometry ───────────────────────────────────────────
+    # Shows the trajectory of /odometry/filtered (EKF output).
+    # Should be smoother and more accurate than raw /odom.
+    - Class: rviz_default_plugins/Odometry
+      Enabled: true
+      Name: EKF Odometry
+      Keep: 200                  # keep last 200 poses as a path trail
+      Position Tolerance: 0.1
+      Angle Tolerance: 0.1
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /odometry/filtered
+      Value: true
+
+    # ── Live LiDAR Scan ──────────────────────────────────────────────
+    # Orange dots showing what the LiDAR currently sees.
+    # When localised correctly, these align perfectly with the black
+    # wall cells in the map above. Misalignment = poor localisation.
+    - Class: rviz_default_plugins/LaserScan
+      Color: 255; 120; 0
+      Color Transformer: FlatColor
+      Enabled: true
+      Name: LaserScan
+      Size (m): 0.04
+      Style: Spheres
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Best Effort
+        Value: /scan/filtered
+      Value: true
+
+    # ── Robot 3D Model ───────────────────────────────────────────────
+    - Alpha: 1
+      Class: rviz_default_plugins/RobotModel
+      Description Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /robot_description
+      Enabled: true
+      Name: RobotModel
+      Value: true
+      Visual Enabled: true
+
+    # ── TF Frames ────────────────────────────────────────────────────
+    # During localisation, verify these transforms exist:
+    #   map → odom        (from AMCL)
+    #   odom → base_footprint  (from EKF)
+    - Class: rviz_default_plugins/TF
+      Enabled: true
+      Frame Timeout: 15
+      Frames:
+        All Enabled: true
+      Marker Scale: 0.2
+      Name: TF
+      Show Arrows: false
+      Show Axes: true
+      Show Names: false
+      Value: true
+
+  Enabled: true
+
+  Global Options:
+    Background Color: 20; 20; 20
+    Fixed Frame: map               # always "map" during localisation
+    Frame Rate: 20
+
+  Name: root
+
+  Tools:
+    - Class: rviz_default_plugins/Interact
+      Hide Inactive: false
+    - Class: rviz_default_plugins/MoveCamera
+
+    # ── 2D Pose Estimate ─────────────────────────────────────────────
+    # THE most important tool in this step.
+    # Click it → click on the map → drag to set heading.
+    # Sends a PoseWithCovarianceStamped to /initialpose.
+    # AMCL uses it to reinitialise particle cloud around that location.
+    - Class: rviz_default_plugins/SetInitialPose
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /initialpose
+
+    - Class: rviz_default_plugins/SetGoal
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /goal_pose
+
+    - Class: rviz_default_plugins/Select
+    - Class: rviz_default_plugins/FocusCamera
+
+  Value: true
+
+  Views:
+    Current:
+      Class: rviz_default_plugins/TopDownOrtho
+      Scale: 50                  # zoom in a bit more than mapping view
+      Angle: 0
+      X: 0
+      Y: 0
+      Name: Current View
+      Near Clip Distance: 0.01
+      Target Frame: <Fixed Frame>
+      Value: TopDownOrtho (rviz)
+    Saved: ~

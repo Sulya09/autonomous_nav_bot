@@ -1,0 +1,115 @@
+# ══════════════════════════════════════════════════════════════════════════
+# config/control_params.yaml
+# ───────────────────────────
+# Parameters for the motor control safety layer.
+#
+# CONTROL PIPELINE
+# ─────────────────
+# This layer sits at the very end of the command chain, just before
+# velocity commands reach the robot's drive motors.
+#
+#   Nav2 / teleop
+#       │
+#       ▼
+#   /cmd_vel_raw            ← raw velocity request
+#       │
+#       ▼
+#   [velocity_controller]   ← safety gate
+#     ├─ Hard speed clamping (never exceed physical limits)
+#     ├─ Emergency stop integration (zero velocity when e-stop active)
+#     └─ Dead-man switch (zero velocity if no command for N seconds)
+#       │
+#       ▼
+#   /cmd_vel                ← final command to robot
+#
+#   [emergency_stop]        ← runs in parallel, monitors LiDAR
+#     ├─ DANGER  zone: publishes e-stop = true  (full stop)
+#     ├─ CAUTION zone: publishes speed reduction suggestion
+#     └─ CLEAR   zone: publishes e-stop = false (normal operation)
+#       │
+#       ▼
+#   /emergency_stop         ← Bool, read by velocity_controller
+#
+# WHY A DEAD-MAN SWITCH?
+# ───────────────────────
+# If the ROS 2 process that sends cmd_vel crashes or the network drops,
+# the robot's last velocity command stays latched. Without a dead-man
+# switch, the robot drives in circles until it hits a wall. With a 0.5s
+# timeout, the robot stops automatically within half a second of losing
+# contact with the planner.
+#
+# WHY HARD SPEED LIMITS IN ADDITION TO NAV2 LIMITS?
+# ────────────────────────────────────────────────────
+# Nav2 has its own velocity limits (in nav2_params.yaml). However:
+#   • Teleop keyboard users can type faster than nav2 limits allow
+#   • A misconfigured nav2_params.yaml might exceed hardware limits
+#   • This layer provides a final guarantee, independent of Nav2 config
+# ══════════════════════════════════════════════════════════════════════════
+
+# ── Velocity Controller ───────────────────────────────────────────────────
+velocity_controller:
+  ros__parameters:
+
+    # Topic the controller subscribes to (from Nav2 velocity smoother
+    # or from teleop keyboard for manual driving)
+    input_topic:  "/cmd_vel_raw"
+    output_topic: "/cmd_vel"
+
+    # Emergency stop signal from the EmergencyStop node
+    e_stop_topic: "/emergency_stop"
+
+    # Dead-man switch: if no command arrives within this window,
+    # publish zero velocity. Prevents runaway on comms loss.
+    cmd_timeout_s: 0.5      # seconds
+
+    # Hard velocity limits — independent of Nav2 config.
+    # These must not exceed the robot's physical capability:
+    #   max_linear_vel  : 0.26 m/s  (from robot_description.yaml)
+    #   max_angular_vel : 1.82 rad/s (from robot_description.yaml)
+    max_linear_vel:  0.26   # m/s
+    max_angular_vel: 1.82   # rad/s
+
+    # Publish diagnostic status every N seconds
+    stats_interval_s: 5.0
+
+# ── Emergency Stop ────────────────────────────────────────────────────────
+emergency_stop:
+  ros__parameters:
+
+    # Reads the filtered LiDAR scan (Step 2 output)
+    scan_topic:   "/scan/filtered"
+
+    # Publishes True when robot must stop, False when clear
+    e_stop_topic: "/emergency_stop"
+
+    # ── Safety zones ────────────────────────────────────────────────────
+    # DANGER  zone: any reading below stop_distance → full stop
+    #   stop_distance: 0.20m = robot_radius (0.22m) - 2cm margin
+    #   This is the "last resort" — ideally Nav2 costmaps prevent
+    #   the robot getting this close to anything.
+    stop_distance: 0.20     # metres
+
+    # CAUTION zone: readings below slow_distance → reduced speed
+    #   slow_distance: 0.40m gives a 20cm warning buffer before danger
+    slow_distance: 0.40     # metres
+
+    # Speed reduction factor in CAUTION zone.
+    # velocity_controller multiplies incoming cmd_vel by this factor.
+    # 0.4 = reduce to 40% of commanded speed near obstacles.
+    slow_speed_factor: 0.4
+
+    # How many adjacent rays must be in danger before e-stop fires.
+    # Prevents false triggers from a single noisy reading.
+    # 3 rays = 3° arc — a real obstacle covers more than that.
+    min_danger_rays: 3
+
+    # ── Angular scan window ──────────────────────────────────────────
+    # Only check rays within ±front_angle_deg of the robot's forward
+    # direction for the DANGER zone. This prevents braking when a wall
+    # is detected behind the robot while driving forward.
+    #
+    # Set to 180.0 to check the full 360° (more conservative).
+    front_angle_deg: 180.0  # degrees — full hemisphere in front+sides
+
+    # Diagnostics publishing interval
+    stats_interval_s: 2.0

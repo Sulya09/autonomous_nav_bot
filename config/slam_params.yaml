@@ -1,0 +1,210 @@
+# ══════════════════════════════════════════════════════════════════════════
+# config/slam_params.yaml
+# ────────────────────────
+# Configuration for slam_toolbox (async_slam_toolbox_node).
+#
+# WHAT IS SLAM?
+# ─────────────
+# SLAM = Simultaneous Localisation And Mapping.
+# The robot doesn't know where it is, and it doesn't have a map.
+# It must solve both problems at the same time using only its LiDAR.
+#
+# HOW SLAM_TOOLBOX WORKS (simplified)
+# ─────────────────────────────────────
+#   1. Robot moves → odom frame shifts → /scan arrives
+#   2. slam_toolbox matches the new scan against the previous scan
+#      (called "scan matching" — like comparing two photographs)
+#   3. The match gives a corrected pose (position + rotation)
+#   4. That pose is added as a NODE in a POSE GRAPH
+#   5. When the robot revisits a place, a LOOP CLOSURE is detected:
+#      edges are added between the old and new nodes
+#   6. A graph SOLVER (Ceres) optimises all node positions to be
+#      globally consistent — this eliminates accumulated drift
+#   7. The occupancy grid MAP is rendered from all stored scans
+#
+# PARAMETER GROUPS (in order below)
+# ────────────────────────────────────
+#   1. Solver        — math backend for graph optimisation
+#   2. Frames        — ROS coordinate frame names
+#   3. Sensor        — which topic and range to use
+#   4. Map           — grid resolution and update policy
+#   5. Pose graph    — when to add new nodes
+#   6. Scan matching — how to align consecutive scans
+#   7. Loop closure  — how to detect and close loops
+#
+# TUNING GUIDE (quick reference)
+# ────────────────────────────────
+#   Blurry / noisy map     → decrease resolution (0.05→0.03)
+#   Map drifts over time   → decrease minimum_travel_distance
+#   Slow / uses too much CPU → increase minimum_travel_distance
+#   Loop closure misses    → decrease loop_match_minimum_response_fine
+#   False loop closures    → increase loop_match_minimum_response_fine
+# ══════════════════════════════════════════════════════════════════════════
+
+slam_toolbox:
+  ros__parameters:
+
+    # ── 1. SOLVER ─────────────────────────────────────────────────────────
+    # The solver is the math engine that optimises the pose graph.
+    # CeresSolver is the standard choice — it's robust, well-tested,
+    # and supports large graphs without becoming unstable.
+    solver_plugin: solver_plugins::CeresSolver
+
+    # SPARSE_NORMAL_CHOLESKY: best for sparse graphs (most indoor maps).
+    # Alternative: DENSE_SCHUR (more accurate but slower for large graphs)
+    ceres_linear_solver: SPARSE_NORMAL_CHOLESKY
+
+    # JACOBI preconditioner accelerates convergence for well-conditioned graphs.
+    ceres_preconditioner: JACOBI
+
+    # LEVENBERG_MARQUARDT: industry-standard trust region method.
+    # Robust to bad initialisations and scales well to large graphs.
+    ceres_trust_strategy: LEVENBERG_MARQUARDT
+
+    # Dogleg step strategy within the trust region
+    ceres_dogleg_type: TRADITIONAL_DOGLEG
+
+    # HUBER loss reduces influence of outlier loop closures.
+    # "None" trusts all constraints equally — fine for simulation.
+    # Switch to "HUBER" for real robots in cluttered environments.
+    ceres_loss_function: None
+
+    # ── 2. COORDINATE FRAMES ──────────────────────────────────────────────
+    # These MUST match the frame_id values in your URDF and Gazebo plugin.
+    # Wrong frames = no map, no TF, silent failure.
+    odom_frame:  odom           # published by the diff_drive Gazebo plugin
+    map_frame:   map            # the global frame slam_toolbox creates
+    base_frame:  base_footprint  # robot ground projection (Nav2 convention)
+
+    # ── 3. SENSOR INPUT ───────────────────────────────────────────────────
+    # IMPORTANT: We use /scan/filtered (output of lidar_processor, Step 2)
+    # rather than /scan (raw Gazebo output).
+    # Filtered scans = cleaner map edges and more reliable loop closures.
+    scan_topic: /scan/filtered
+
+    # Maximum range to consider from the laser.
+    # Readings beyond this are treated as "no return" (free space).
+    # Must match (or be less than) the sensor's physical range_max.
+    max_laser_range: 3.5    # metres — matches RPLIDAR A1 spec in sensors.yaml
+
+    # ── 4. MAP SETTINGS ───────────────────────────────────────────────────
+    # Resolution of the output occupancy grid (.pgm file).
+    # 0.05 m = each grid cell represents 5 cm × 5 cm of real space.
+    # Finer (0.03) = sharper map, slower solver. Coarser (0.10) = faster.
+    resolution: 0.05
+
+    # Operation mode: "mapping" builds the map from scratch.
+    # "localization" uses an existing map (used in Step 4).
+    mode: mapping
+
+    # Allow the map_saver service to be called externally
+    # (our map_saver.py node uses this)
+    use_map_saver: true
+
+    # RViz2 interactive mode: lets you manually drag nodes to fix drift.
+    # Disable in production for performance.
+    enable_interactive_mode: true
+
+    # ── 5. POSE GRAPH — WHEN TO ADD NODES ────────────────────────────────
+    # A new GRAPH NODE (measurement point) is created when the robot has
+    # moved at least minimum_travel_distance OR rotated minimum_travel_heading
+    # AND at least minimum_time_interval seconds have elapsed.
+    #
+    # THINK OF IT LIKE: taking photos while hiking.
+    # Too frequent = thousands of nearly-identical photos (slow solver).
+    # Too infrequent = big gaps in coverage (map holes).
+
+    # Add a node every 0.5 m of travel (10× robot width is a good rule)
+    minimum_travel_distance: 0.5     # metres
+
+    # OR add a node every ~29° of rotation (important for corners)
+    minimum_travel_heading: 0.5      # radians ≈ 28.6°
+
+    # Never add nodes faster than once per 0.5 s (prevents CPU spikes)
+    minimum_time_interval: 0.5       # seconds
+
+    # ── 6. SCAN MATCHING ──────────────────────────────────────────────────
+    # Scan matching aligns the current LiDAR scan against previous scans
+    # to estimate how much the robot moved since the last node.
+    # This corrects odometry drift between pose graph nodes.
+
+    use_scan_matching: true
+    use_scan_barycenter: true    # use scan centroid for stability
+
+    # How many recent scans to keep in memory for matching.
+    # Larger buffer = more context = better matching, but uses more RAM.
+    scan_buffer_size: 10
+
+    # Only keep scans taken within this distance of the current position.
+    scan_buffer_maximum_scan_distance: 10.0   # metres
+
+    # Minimum match quality to accept a scan match result.
+    # Below this, the matcher falls back to odometry.
+    link_match_minimum_response_fine: 0.1    # 0–1 scale; 0.1 is permissive
+
+    # How far away to search for a matching scan (prevents wild guesses)
+    link_scan_maximum_distance: 1.5          # metres
+
+    # ── Search Space for Scan Correlation ─────────────────────────────────
+    # The matcher tries different x/y/θ offsets within this window.
+    # Dimension = total search width in metres.
+    correlation_search_space_dimension:   0.5   # metres
+    correlation_search_space_resolution:  0.01  # metres per step
+    correlation_search_space_smear_deviation: 0.1
+
+    # ── Angular search for fine matching ──────────────────────────────────
+    fine_search_angle_offset:   0.00349    # radians = 0.2° — fine grid
+    coarse_search_angle_offset: 0.349      # radians = 20°  — coarse grid
+    coarse_angle_resolution:    0.0349     # radians = 2°   — step size
+
+    # Penalty weights control how much the matcher "trusts" its own guess
+    # vs odometry. Higher penalty = stick closer to odometry.
+    distance_penalty:       0.5
+    angle_penalty:          1.0
+    minimum_distance_penalty: 0.5
+    minimum_angle_penalty:    0.9
+    use_response_expansion:   true
+
+    # ── 7. LOOP CLOSURE ───────────────────────────────────────────────────
+    # Loop closure is the key feature of SLAM. When the robot returns to
+    # a previously visited area, it recognises the place from the LiDAR
+    # scan patterns and snaps the two trajectory ends together.
+    # Without loop closure, odometry drift accumulates indefinitely.
+    #
+    # VISUALISATION TIP: In RViz2 you will see the map "shift and correct"
+    # suddenly — that is a loop closure resolving accumulated drift.
+    do_loop_closing: true
+
+    # Search radius around current position for loop closure candidates.
+    # 3.0 m means "check if I've been within 3 m of here before."
+    loop_search_maximum_distance: 3.0      # metres
+
+    # How many consecutive nodes must match to confirm a loop.
+    # Higher = fewer false positives; lower = catches more genuine loops.
+    loop_match_minimum_chain_size: 10
+
+    # Search space for the loop closure scan correlator.
+    loop_search_space_dimension:       8.0    # metres
+    loop_search_space_resolution:      0.05   # metres per step
+    loop_search_space_smear_deviation: 0.03
+
+    # Match quality thresholds for accepting a loop closure candidate.
+    # Coarse pass narrows candidates; fine pass confirms them.
+    # INCREASE if you see incorrect loop closures (map folds).
+    # DECREASE if genuine loops are being missed.
+    loop_match_maximum_variance_coarse:  3.0
+    loop_match_minimum_response_coarse:  0.35  # 0–1 scale
+    loop_match_minimum_response_fine:    0.45  # 0–1 scale (stricter)
+
+    # ── 8. PERFORMANCE ────────────────────────────────────────────────────
+    # How long to wait for a TF transform before giving up.
+    # Increase if you see "TF lookup timeout" warnings.
+    transform_timeout: 0.2       # seconds
+
+    # How far back in time to keep TF history.
+    # Needed so slam_toolbox can look up old transforms for loop closure.
+    tf_buffer_duration: 30.0     # seconds
+
+    # Thread stack size for the Ceres solver. 40 MB is safe for most maps.
+    # Increase for very large maps (> 50 m × 50 m).
+    stack_size_to_use: 40000000  # bytes = 40 MB

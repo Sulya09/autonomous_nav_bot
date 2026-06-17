@@ -1,0 +1,462 @@
+# ══════════════════════════════════════════════════════════════════════════
+# config/nav2_params.yaml
+# ────────────────────────
+# Configuration for the full Nav2 (Navigation2) stack.
+#
+# HOW NAV2 WORKS — THE BIG PICTURE
+# ──────────────────────────────────
+# When you send the robot a goal pose, here is the exact pipeline:
+#
+#  You click "2D Nav Goal" in RViz2
+#         │
+#         ▼
+#  [bt_navigator]  ← Behavior Tree orchestrator
+#    Reads a BT XML file. The default BT runs these steps in order:
+#    1. Call planner_server to compute a global path
+#    2. Call controller_server to follow that path
+#    3. If stuck → call behavior_server (spin/backup/wait)
+#    4. Repeat until the goal is reached or timed out
+#         │
+#         ├──► [planner_server]   — "Find a path from A to B on the global map"
+#         │      Plugin: NavFn (Dijkstra/A*)
+#         │      Input:  current pose + goal pose + /global_costmap/costmap
+#         │      Output: /plan  (nav_msgs/Path)
+#         │
+#         ├──► [controller_server]  — "Follow the path while avoiding obstacles"
+#         │      Plugin: DWB (Dynamic Window B approach)
+#         │      Input:  /plan + current velocity + /local_costmap/costmap
+#         │      Output: /cmd_vel  (geometry_msgs/Twist)
+#         │                   │
+#         │                   ▼
+#         │            [velocity_smoother] → /cmd_vel_smoothed → robot wheels
+#         │
+#         └──► [behavior_server]  — "I'm stuck, do something"
+#               Plugins: Spin, BackUp, Wait, DriveOnHeading
+#
+#  [global_costmap]  — Inflated obstacles overlaid on the full saved map
+#  [local_costmap]   — Rolling 3×3m window of real-time LiDAR obstacles
+#
+# ROBOT DIMENSIONS (from robot_description.yaml / urdf)
+# ───────────────────────────────────────────────────────
+#   chassis    : 0.40m × 0.30m
+#   robot_radius   : 0.22m  (conservative bounding circle)
+#   max_vel_x      : 0.26 m/s
+#   max_vel_theta  : 1.82 rad/s
+# ══════════════════════════════════════════════════════════════════════════
+
+# ── 1. BEHAVIOR TREE NAVIGATOR ────────────────────────────────────────────
+# The top-level orchestrator. Reads a BT XML file and calls the other
+# servers (planner, controller, behaviors) according to the tree logic.
+# The default BT handles: plan → follow → recover → replan.
+bt_navigator:
+  ros__parameters:
+    global_frame: map
+    robot_base_frame: base_link
+    odom_topic: /odometry/filtered   # from EKF (Step 4), not raw /odom
+
+    # How long each BT tick lasts (ms). Lower = more responsive recovery.
+    bt_loop_duration: 10             # milliseconds
+
+    # Max time to wait for an action server to respond at startup.
+    default_server_timeout: 20       # seconds
+    wait_for_service_timeout: 1000   # milliseconds
+
+    # Max time a navigation action can run before being force-cancelled.
+    # 900 s = 15 min. Increase for very large maps.
+    action_server_result_timeout: 900.0
+
+    # Which navigator plugins to load (both single-goal and multi-goal)
+    navigators: ['navigate_to_pose', 'navigate_through_poses']
+    navigate_to_pose:
+      plugin: "nav2_bt_navigator/NavigateToPoseNavigator"
+    navigate_through_poses:
+      plugin: "nav2_bt_navigator/NavigateThroughPosesNavigator"
+
+    # BT XML files — empty string = use Nav2's built-in default BTs.
+    # The default is navigate_to_pose_w_replanning_and_recovery.xml
+    # which handles replanning + spin/backup recovery out of the box.
+    # Override with your own BT XML for custom behaviors.
+    default_nav_to_pose_bt_xml: ""
+    default_nav_through_poses_bt_xml: ""
+
+    # BT node plugins (action/condition nodes the BT XML can reference)
+    plugin_lib_names:
+      - nav2_compute_path_to_pose_action_bt_node
+      - nav2_compute_path_through_poses_action_bt_node
+      - nav2_smooth_path_action_bt_node
+      - nav2_follow_path_action_bt_node
+      - nav2_spin_action_bt_node
+      - nav2_wait_action_bt_node
+      - nav2_back_up_action_bt_node
+      - nav2_drive_on_heading_bt_node
+      - nav2_clear_costmap_service_bt_node
+      - nav2_is_stuck_condition_bt_node
+      - nav2_goal_reached_condition_bt_node
+      - nav2_goal_updated_condition_bt_node
+      - nav2_globally_updated_goal_condition_bt_node
+      - nav2_is_path_valid_condition_bt_node
+      - nav2_reinitialize_global_localization_service_bt_node
+      - nav2_rate_controller_bt_node
+      - nav2_distance_controller_bt_node
+      - nav2_recovery_node_bt_node
+      - nav2_pipeline_sequence_bt_node
+      - nav2_round_robin_node_bt_node
+      - nav2_transform_available_condition_bt_node
+      - nav2_time_expired_condition_bt_node
+      - nav2_path_expiring_timer_condition
+      - nav2_distance_traveled_condition_bt_node
+      - nav2_navigate_through_poses_action_bt_node
+      - nav2_navigate_to_pose_action_bt_node
+      - nav2_remove_passed_goals_action_bt_node
+      - nav2_planner_selector_bt_node
+      - nav2_controller_selector_bt_node
+      - nav2_goal_checker_selector_bt_node
+
+# ── 2. PLANNER SERVER (Global Path Planner) ───────────────────────────────
+# Computes a collision-free path from current pose to goal using the
+# global costmap. Only re-runs when the goal changes or the path is
+# declared invalid by the controller.
+#
+# Plugin: NavFn — implements both Dijkstra (use_astar=false) and A*.
+#   Dijkstra: guaranteed shortest path, explores more of the map.
+#   A*:       faster, uses a heuristic, same result in open spaces.
+#   Use Dijkstra for reliability (set use_astar: false).
+planner_server:
+  ros__parameters:
+    expected_planner_frequency: 20.0     # Hz — how often the server expects requests
+    planner_plugins: ["GridBased"]
+
+    GridBased:
+      plugin: "nav2_navfn_planner/NavfnPlanner"
+
+      # Tolerance: how close to the goal the path endpoint must land.
+      # 0.5m is forgiving; reduce to 0.1m for precision docking.
+      tolerance: 0.5    # metres
+
+      # Use Dijkstra (false) vs A* (true). See comment above.
+      use_astar: false
+
+      # Allow planning through unexplored (grey/unknown) cells.
+      # true = useful in partially-mapped environments.
+      # false = robot refuses to enter unmapped areas.
+      allow_unknown: true
+
+# ── 3. CONTROLLER SERVER (Local Trajectory Follower) ──────────────────────
+# Follows the global path in real time while reacting to dynamic obstacles.
+# Runs at controller_frequency Hz, much faster than the global planner.
+#
+# Plugin: DWB (Dynamic Window Approach B)
+#   At each tick, DWB samples many (vx, vtheta) velocity pairs within
+#   the robot's dynamic reachability window (constrained by acceleration),
+#   simulates each trajectory forward in time, scores them using "critics",
+#   and selects the best-scoring trajectory to execute.
+#
+# CRITICS — how DWB scores each trajectory candidate:
+#   PathDist    — stay close to the global path (main driver)
+#   PathAlign   — point in the direction of the path
+#   GoalDist    — get closer to the goal
+#   GoalAlign   — point toward the goal when near it
+#   RotateToGoal— rotate in place at the final position
+#   BaseObstacle— penalise trajectories that pass near obstacles
+#   Oscillation — penalise back-and-forth oscillation
+controller_server:
+  ros__parameters:
+    controller_frequency: 20.0   # Hz — how often a new cmd_vel is computed
+    odom_topic: /odometry/filtered
+
+    # Safety thresholds — below these speeds the robot is treated as stopped.
+    min_x_velocity_threshold:     0.001  # m/s
+    min_y_velocity_threshold:     0.5    # m/s (not used for diff drive)
+    min_theta_velocity_threshold: 0.001  # rad/s
+
+    # How long the controller can fail to make progress before giving up.
+    failure_tolerance: 0.3       # seconds
+
+    # Progress checker: confirms the robot is actually moving toward goal.
+    progress_checker_plugin: "progress_checker"
+    progress_checker:
+      plugin: "nav2_controller::SimpleProgressChecker"
+      # Robot must move 0.5m within 10s, or replanning is triggered.
+      required_movement_radius: 0.5   # metres
+      movement_time_allowance:  10.0  # seconds
+
+    # Goal checker: confirms the robot has reached the target pose.
+    goal_checker_plugins: ["general_goal_checker"]
+    general_goal_checker:
+      stateful: true
+      plugin: "nav2_controller::SimpleGoalChecker"
+      xy_goal_tolerance:  0.25   # metres — how close to goal position
+      yaw_goal_tolerance: 0.25   # radians — how close to goal heading
+
+    # Which controller plugin to use for path following.
+    controller_plugins: ["FollowPath"]
+
+    # ── DWB Local Planner settings ───────────────────────────────────
+    FollowPath:
+      plugin: "dwb_core::DWBLocalPlanner"
+      debug_trajectory_details: false  # set true to log all trajectories
+
+      # ── Velocity limits (match robot_description.yaml) ──────────────
+      # x = forward; y = lateral (always 0 for diff drive); theta = rotation
+      min_vel_x:  0.0    # don't drive backwards by default
+      min_vel_y:  0.0
+      max_vel_x:  0.26   # m/s  — from robot_description.yaml
+      max_vel_y:  0.0
+      max_vel_theta:  1.82   # rad/s — from robot_description.yaml
+      min_speed_xy:   0.0
+      max_speed_xy:   0.26
+      min_speed_theta: 0.0
+
+      # ── Acceleration limits ──────────────────────────────────────────
+      # How fast velocity can change in one controller tick.
+      # Tighter limits = smoother motion; looser = snappier turns.
+      acc_lim_x:     2.5    # m/s²
+      acc_lim_y:     0.0
+      acc_lim_theta: 3.2    # rad/s²
+      decel_lim_x:   -2.5  # m/s² (negative = deceleration)
+      decel_lim_y:    0.0
+      decel_lim_theta: -3.2
+
+      # ── Trajectory sampling ──────────────────────────────────────────
+      # How many velocity samples in each dimension to evaluate per tick.
+      # More samples = better path quality, more CPU. For a small robot:
+      vx_samples:     20
+      vy_samples:     1    # always 1 for differential drive (no lateral)
+      vtheta_samples: 20
+
+      # How far forward to simulate each trajectory (seconds).
+      # Longer = smoother path around obstacles; shorter = more reactive.
+      sim_time: 1.7
+
+      # Step sizes for the simulation rollout.
+      linear_granularity:  0.05   # metres between points on trajectory
+      angular_granularity: 0.025  # radians
+
+      # ── Critics and their weights ────────────────────────────────────
+      # Higher scale = more influence on trajectory selection.
+      # The values below are well-tested defaults for indoor navigation.
+      critics: ["RotateToGoal", "Oscillation", "BaseObstacle",
+                "GoalAlign", "PathAlign", "PathDist", "GoalDist"]
+
+      PathDist.scale:                 32.0   # stay near global path (primary)
+      PathAlign.scale:                32.0   # point along the path
+      PathAlign.forward_point_distance: 0.1  # look-ahead for alignment
+      GoalDist.scale:                 24.0   # approach the goal
+      GoalAlign.scale:                24.0   # face the goal
+      GoalAlign.forward_point_distance: 0.1
+      BaseObstacle.scale:              0.02  # mild obstacle penalty
+                                              # (costmap already inflates)
+      RotateToGoal.scale:             32.0   # rotate at final position
+      RotateToGoal.slowing_factor:     5.0   # slow down before rotating
+      RotateToGoal.lookahead_time:    -1.0   # -1 = auto
+
+      transform_tolerance:          0.2    # seconds
+      xy_goal_tolerance:            0.25   # metres
+      trans_stopped_velocity:       0.25   # consider stopped below this m/s
+      short_circuit_trajectory_evaluation: true  # stop evaluating once best found
+      stateful: true
+
+# ── 4. SMOOTHER SERVER ────────────────────────────────────────────────────
+# Smooths the global plan computed by the planner, removing jagged corners.
+# Smoother paths = more comfortable rides + fewer sharp turns near walls.
+smoother_server:
+  ros__parameters:
+    smoother_plugins: ["simple_smoother"]
+    simple_smoother:
+      plugin: "nav2_smoother::SimpleSmoother"
+      tolerance: 1.0e-10   # convergence tolerance
+      max_its:   1000       # max smoothing iterations
+      do_refinement: true   # refine path after smoothing
+
+# ── 5. BEHAVIOR SERVER (Recovery Behaviors) ────────────────────────────────
+# Called by the BT when the robot is stuck or lost. Executes pre-programmed
+# escape manoeuvres before the BT tries replanning.
+#
+# Spin    — rotate 360° in place to re-scan the area
+# BackUp  — drive backwards 0.3m to clear an obstacle
+# Wait    — pause for N seconds (useful for dynamic obstacles to clear)
+# DriveOnHeading — drive forward on current heading (nudge out of stuck)
+behavior_server:
+  ros__parameters:
+    # Costmap topics for collision checking during recovery
+    local_costmap_topic:     local_costmap/costmap_raw
+    global_costmap_topic:    global_costmap/costmap_raw
+    local_footprint_topic:   local_costmap/published_footprint
+    global_footprint_topic:  global_costmap/published_footprint
+
+    cycle_frequency: 10.0   # Hz
+
+    behavior_plugins: ["spin", "backup", "drive_on_heading", "wait"]
+    spin:
+      plugin: "nav2_behaviors/Spin"
+    backup:
+      plugin: "nav2_behaviors/BackUp"
+    drive_on_heading:
+      plugin: "nav2_behaviors/DriveOnHeading"
+    wait:
+      plugin: "nav2_behaviors/Wait"
+
+    local_frame:      odom
+    global_frame:     map
+    robot_base_frame: base_link
+    transform_tolerance: 0.1    # seconds
+    simulate_ahead_time: 2.0    # seconds to simulate recovery before executing
+
+    # Rotation limits for spin recovery
+    max_rotational_vel: 1.0     # rad/s
+    min_rotational_vel: 0.4     # rad/s (minimum to actually move)
+    rotational_acc_lim: 3.2     # rad/s²
+
+# ── 6. WAYPOINT FOLLOWER ──────────────────────────────────────────────────
+# Accepts a list of waypoints via the FollowWaypoints action.
+# Our waypoint_follower.py node sends waypoints to this server.
+waypoint_follower:
+  ros__parameters:
+    loop_rate: 20         # Hz
+    stop_on_failure: false  # continue to next waypoint even if one fails
+
+    # What to do while paused at each waypoint.
+    # WaitAtWaypoint: pause for a fixed duration.
+    # InputAtWaypoint: wait for a topic message before continuing.
+    waypoint_task_executor_plugin: "wait_at_waypoint"
+    wait_at_waypoint:
+      plugin: "nav2_waypoint_follower::WaitAtWaypoint"
+      enabled: true
+      waypoint_pause_duration: 200   # milliseconds to pause at each waypoint
+
+# ── 7. VELOCITY SMOOTHER ──────────────────────────────────────────────────
+# Applies acceleration limits to cmd_vel before it reaches the robot.
+# Prevents the controller from commanding instantaneous velocity changes
+# that would cause wheel slip or tip the robot.
+#
+# The output topic is /cmd_vel_smoothed, which bringup.launch.py remaps
+# to /cmd_vel so the robot actually receives the smoothed commands.
+velocity_smoother:
+  ros__parameters:
+    smoothing_frequency: 20.0   # Hz
+    scale_velocities: false     # don't scale down both axes proportionally
+
+    # OPEN_LOOP: trusts the commanded velocity as the current velocity.
+    # CLOSED_LOOP: reads actual velocity from odometry. More accurate
+    # but requires /odometry/filtered to be publishing reliably.
+    feedback: "OPEN_LOOP"
+
+    # Velocity envelope [x, y, theta] — must match controller limits
+    max_velocity: [ 0.26,  0.0,  1.82]
+    min_velocity: [-0.26,  0.0, -1.82]
+    max_accel:    [ 2.5,   0.0,  3.2 ]
+    max_decel:    [-2.5,   0.0, -3.2 ]
+
+    odom_topic:       /odometry/filtered
+    odom_duration:    0.1       # seconds of odom history for averaging
+
+    # Below this velocity, don't send commands (prevents twitching at rest).
+    deadband_velocity: [0.0, 0.0, 0.0]
+
+    # Cancel velocity commands older than this (safety timeout).
+    velocity_timeout: 1.0       # seconds
+
+# ══════════════════════════════════════════════════════════════════════════
+# COSTMAPS
+# ─────────
+# Costmaps convert sensor data + map data into a grid where each cell
+# has a "cost" value (0 = free, 253 = nearly lethal, 254 = lethal).
+# The planner finds a path through low-cost cells.
+# The controller avoids high-cost cells while following the path.
+#
+# INFLATION LAYER
+# ───────────────
+# Real obstacles get a "danger zone" around them so the robot doesn't
+# plan a path that just barely clips a wall corner.
+#
+# inflation_radius: 0.35m = robot_radius (0.22m) + 0.13m safety margin
+# cost_scaling_factor: 3.0 = exponential decay of cost with distance
+#   Higher = sharper boundary (more aggressive avoidance)
+#   Lower  = softer boundary (robot hugs walls more)
+# ══════════════════════════════════════════════════════════════════════════
+
+# ── 8. GLOBAL COSTMAP ─────────────────────────────────────────────────────
+# Covers the entire saved map. Updated infrequently (1 Hz) since the
+# static environment doesn't change often. The planner uses this.
+global_costmap:
+  global_costmap:
+    ros__parameters:
+      update_frequency:  1.0    # Hz — how often to refresh obstacle data
+      publish_frequency: 1.0    # Hz — how often to publish for RViz2
+      global_frame:      map
+      robot_base_frame:  base_footprint
+      robot_radius:      0.22   # metres — bounding circle of our robot
+      resolution:        0.05   # metres/cell — matches the saved map
+      track_unknown_space: true  # unknown cells cost less than obstacles
+
+      # Layer stack (processed in order, bottom to top)
+      plugins: ["static_layer", "obstacle_layer", "inflation_layer"]
+
+      static_layer:
+        plugin: "nav2_costmap_2d::StaticLayer"
+        # Subscribe with transient-local so we receive the map
+        # even if we started after map_server published it.
+        map_subscribe_transient_local: true
+
+      obstacle_layer:
+        plugin: "nav2_costmap_2d::ObstacleLayer"
+        enabled: true
+        observation_sources: scan
+        scan:
+          topic: /scan/filtered     # filtered LiDAR from Step 2
+          data_type: "LaserScan"
+          max_obstacle_height:  2.0   # metres — ignore readings above this
+          clearing: true             # clear free space in front of robot
+          marking: true              # mark occupied cells behind obstacles
+          raytrace_max_range: 3.5    # clear space up to this distance
+          raytrace_min_range: 0.12   # don't clear closer than this
+          obstacle_max_range: 3.0    # mark obstacles up to this distance
+          obstacle_min_range: 0.12   # don't mark closer than this
+
+      inflation_layer:
+        plugin: "nav2_costmap_2d::InflationLayer"
+        inflation_radius:    0.35   # metres — danger zone around obstacles
+        cost_scaling_factor: 3.0    # exponential decay rate
+
+      always_send_full_costmap: true
+
+# ── 9. LOCAL COSTMAP ──────────────────────────────────────────────────────
+# A rolling 3m × 3m window centred on the robot. Updated at 5 Hz to
+# react to dynamic obstacles (people walking past, chairs moved, etc.).
+# The DWB controller uses this to avoid obstacles in real time.
+local_costmap:
+  local_costmap:
+    ros__parameters:
+      update_frequency:  5.0    # Hz — faster than global (dynamic obstacles)
+      publish_frequency: 2.0    # Hz
+      global_frame:      odom   # local costmap lives in the odom frame
+      robot_base_frame:  base_footprint
+      rolling_window:    true   # window moves with the robot
+      width:  3                 # metres — local window size
+      height: 3                 # metres
+      resolution: 0.05          # metres/cell
+      robot_radius: 0.22        # metres
+
+      plugins: ["obstacle_layer", "inflation_layer"]
+
+      obstacle_layer:
+        plugin: "nav2_costmap_2d::ObstacleLayer"
+        enabled: true
+        observation_sources: scan
+        scan:
+          topic: /scan/filtered
+          data_type: "LaserScan"
+          max_obstacle_height:  2.0
+          clearing: true
+          marking: true
+          raytrace_max_range: 3.5
+          raytrace_min_range: 0.12
+          obstacle_max_range: 3.0
+          obstacle_min_range: 0.12
+
+      inflation_layer:
+        plugin: "nav2_costmap_2d::InflationLayer"
+        inflation_radius:    0.35
+        cost_scaling_factor: 3.0
+
+      always_send_full_costmap: true

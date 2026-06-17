@@ -1,0 +1,140 @@
+# ══════════════════════════════════════════════════════════════════════════
+# config/robot_description.yaml
+# ──────────────────────────────
+# Human-readable reference document for all physical parameters of the
+# autonomous_nav_bot. This file does NOT drive the URDF directly —
+# the URDF uses its own internal xacro:property values.
+#
+# USE THIS FILE TO:
+#   • Quickly look up robot dimensions without opening the URDF
+#   • Cross-check that URDF values match real hardware
+#   • Share robot specs with other team members
+#   • Configure external tools (motor drivers, tuning sheets, etc.)
+# ══════════════════════════════════════════════════════════════════════════
+
+robot:
+  name: "autonomous_nav_bot"
+  type: "differential_drive"
+  description: >
+    A two-wheeled differential drive robot with front/rear caster support,
+    a 360° 2D LiDAR, RGB camera, and 6-DOF IMU. Designed for indoor
+    autonomous navigation using ROS 2 + Nav2 + SLAM Toolbox.
+
+# ── Physical Dimensions ──────────────────────────────────────────────────
+
+chassis:
+  length_m:   0.40    # front-to-back
+  width_m:    0.30    # left-to-right
+  height_m:   0.10    # top-to-bottom (platform thickness)
+  mass_kg:    5.0
+  material:   "aluminium frame + acrylic platform"
+
+drive_wheels:
+  count:          2
+  side:           ["left", "right"]
+  radius_m:       0.05    # 5 cm — determines robot ground clearance
+  width_m:        0.04    # tyre thickness
+  mass_kg:        0.50
+  # center-to-center distance between the two wheels
+  # Formula: chassis_width + wheel_width = 0.30 + 0.04 = 0.34 m
+  separation_m:   0.34
+  max_torque_Nm:  10.0
+  max_speed_rads: 5.0     # ~0.25 m/s linear at the rim
+
+caster_wheels:
+  count:      2
+  positions:  ["front", "rear"]
+  radius_m:   0.025   # half the drive wheel radius → both touch the floor
+  mass_kg:    0.10
+  type:       "fixed-axle ball caster (near-zero friction in simulation)"
+
+total_mass_kg:  6.10   # chassis + 2 wheels + 2 casters + sensors (approx)
+
+# ── Coordinate Frames ────────────────────────────────────────────────────
+# Heights in the world frame (Z = 0 is the floor)
+
+frames:
+  base_footprint:
+    world_z_m: 0.000
+    description: "Virtual ground-plane projection. Required by Nav2 / AMCL."
+
+  base_link:
+    world_z_m: 0.050   # = wheel_radius
+    description: "Chassis centre at wheel-axle height."
+
+  chassis_bottom:
+    world_z_m: 0.050   # sits at axle height, above casters
+  chassis_top:
+    world_z_m: 0.150
+
+  wheel_centre:
+    world_z_m: 0.050   # = base_link height → bottoms at 0.000 ✓
+  caster_centre:
+    world_z_m: 0.025   # = caster_radius → bottoms at 0.000 ✓
+
+  lidar_link:
+    world_z_m: 0.220   # chassis_top (0.15) + 0.07 mount offset
+  camera_link:
+    world_x_m: 0.200   # front face: chassis_length / 2
+    world_z_m: 0.100   # mid-chassis height: wheel_radius + chassis_height/2
+  imu_link:
+    world_z_m: 0.150   # chassis_top surface
+
+# ── TF Frame Tree ────────────────────────────────────────────────────────
+tf_tree:
+  - map
+  - "  └─ odom                  (diff_drive Gazebo plugin)"
+  - "      └─ base_footprint    (virtual ground frame)"
+  - "          └─ base_link     (chassis centre, z = wheel_radius)"
+  - "              ├─ left_wheel_link"
+  - "              ├─ right_wheel_link"
+  - "              ├─ front_caster_link"
+  - "              ├─ rear_caster_link"
+  - "              ├─ lidar_link"
+  - "              ├─ camera_link"
+  - "              │   └─ camera_optical_link"
+  - "              └─ imu_link"
+
+# ── Sensor Specifications ────────────────────────────────────────────────
+
+sensors:
+  lidar:
+    model:          "RPLIDAR A1 (simulated equivalent)"
+    frame_id:       "lidar_link"
+    ros_topic:      "/scan"
+    msg_type:       "sensor_msgs/LaserScan"
+    range_min_m:    0.12    # 12 cm dead zone (real LiDARs have this)
+    range_max_m:    3.50    # 3.5 m usable range
+    angle_min_rad:  -3.14159
+    angle_max_rad:   3.14159
+    samples:        360     # 1 ray per degree
+    update_rate_hz: 10
+    noise_stddev_m: 0.01    # ±1 cm Gaussian noise
+
+  camera:
+    model:          "USB RGB Camera (simulated equivalent)"
+    frame_id:       "camera_optical_link"   # optical frame for image data
+    ros_topic:      "/camera/image_raw"
+    info_topic:     "/camera/camera_info"
+    msg_type:       "sensor_msgs/Image"
+    resolution:     "640x480"
+    fov_horizontal_deg: 80
+    update_rate_hz: 30
+    noise_stddev:   0.007   # pixel noise
+
+  imu:
+    model:          "MPU-6050 class (simulated)"
+    frame_id:       "imu_link"
+    ros_topic:      "/imu"
+    msg_type:       "sensor_msgs/Imu"
+    update_rate_hz: 100
+    gyro_noise_stddev_rads:  0.009
+    accel_noise_stddev_ms2:  0.021
+    dof:            6   # 3-axis gyro + 3-axis accelerometer
+
+# ── Performance Targets ──────────────────────────────────────────────────
+
+performance:
+  max_linear_speed_ms:    0.26  # ~0.5 * wheel_radius * max_wheel_speed
+  max_angular_speed_rads: 1.82  # max_linear / (wheel_separation / 2)
+  turning_radius_min_m:   0.0   # can rotate in place (diff drive)

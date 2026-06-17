@@ -1,0 +1,94 @@
+# ══════════════════════════════════════════════════════════════════════════
+# config/sensors.yaml
+# ────────────────────
+# ROS 2 parameter file for all sensor processing nodes.
+#
+# HOW ROS 2 PARAMETER FILES WORK
+# ───────────────────────────────
+# The structure is: node_name → ros__parameters → param: value
+# The node_name must match the 'name' argument given to the Node() in
+# the launch file. When a launch file passes this file via:
+#
+#   parameters=[sensors_config]
+#
+# ROS 2 reads the matching node_name block and loads those parameters.
+# Parameters not listed here fall back to the defaults declared in the
+# node's __init__ with self.declare_parameter().
+#
+# UNITS
+# ─────
+# Distances  : metres (m)
+# Angles     : radians (rad)
+# Speed      : m/s or rad/s
+# Acceleration: m/s²
+# Time       : seconds (s)
+# ══════════════════════════════════════════════════════════════════════════
+
+# ── LiDAR Processing Node ────────────────────────────────────────────────
+lidar_processor:
+  ros__parameters:
+
+    # Topic names — must match what Gazebo / the real driver publishes
+    input_topic:  "/scan"
+    output_topic: "/scan/filtered"
+
+    # Valid measurement range for the simulated RPLIDAR A1
+    # Readings outside this window are clamped to the nearest boundary.
+    range_min:  0.12    # 12 cm — sensor blind spot below this
+    range_max:  3.50    # 3.5 m — reliable range of RPLIDAR A1
+
+    # Moving average noise smoothing
+    # Averages each ray with its angular neighbours to reduce per-reading jitter.
+    # Set enable_smoothing: false if you want to see the raw noise.
+    enable_smoothing: true
+    smoothing_window: 3     # Averaging 3 adjacent rays (1° each = ±1° window)
+                            # Increase to 5 for smoother map edges, at the cost
+                            # of slightly blurring thin obstacles like chair legs.
+
+    # How often to log statistics to /scan/stats and the terminal
+    stats_interval_s: 5.0
+
+# ── IMU Processing Node ──────────────────────────────────────────────────
+imu_processor:
+  ros__parameters:
+
+    input_topic:  "/imu"
+    output_topic: "/imu/filtered"
+
+    # Moving average window — number of samples to average per axis.
+    # IMU runs at 100 Hz. Window of 5 = 50 ms of history per axis.
+    # Larger window → smoother signal, but adds latency.
+    filter_window: 5
+
+    # Spike rejection thresholds.
+    # Readings exceeding these on ANY axis are discarded entirely.
+    #
+    # max_accel_ms2: 50.0 = ~5g. Real robots rarely exceed 2-3g even
+    # during aggressive manoeuvres. Gazebo spikes from collisions can
+    # briefly hit 100+ g, so this threshold catches those.
+    max_accel_ms2: 50.0
+
+    # max_gyro_rads: 10.0 = ~573 °/s. A differential drive robot
+    # spinning hard in place at 2 rad/s max speed with 0.17 m radius
+    # produces ~11.8 rad/s at the wheel — our robot won't exceed ~5 rad/s.
+    max_gyro_rads: 10.0
+
+    stats_interval_s: 5.0
+
+# ── Camera Processing Node ───────────────────────────────────────────────
+camera_processor:
+  ros__parameters:
+
+    input_topic:  "/camera/image_raw"
+    output_topic: "/camera/image_processed"
+
+    # Must match the resolution defined in urdf/gazebo.xacro <image> block
+    expected_width:    640
+    expected_height:   480
+
+    # Encoding published by Gazebo's camera plugin for R8G8B8 format
+    expected_encoding: "rgb8"
+
+    # Stats logging interval — less frequent than LiDAR/IMU since images
+    # are large and the camera is already running at a visible 30 fps.
+    stats_interval_s: 10.0

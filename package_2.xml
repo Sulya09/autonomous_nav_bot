@@ -1,0 +1,103 @@
+<?xml version="1.0"?>
+<?xml-model
+  href="http://download.ros.org/schema/package_format3.xsd"
+  schematypens="http://www.w3.org/2001/XMLSchema"?>
+<!--
+  package.xml — ROS 2 Package Manifest
+  ══════════════════════════════════════
+  This file is the identity card of the ROS 2 package. It tells:
+    • colcon (the build tool) what this package is called
+    • rosdep  (the dependency installer) what to install before building
+    • ros2 pkg (the CLI) how to find and list this package
+
+  DEPENDENCY TYPES
+  ────────────────
+  buildtool_depend  — tools needed to BUILD the package (not at runtime)
+  depend            — needed at both build time AND runtime
+  exec_depend       — needed only at runtime (for Python nodes, launch files)
+  test_depend       — needed only when running tests
+
+  WHY SO MANY DEPENDENCIES?
+  ──────────────────────────
+  We declare all dependencies for the FULL project upfront so that
+  `rosdep install` installs everything in one shot, even if some
+  packages (like slam_toolbox, nav2) are only used in later steps.
+-->
+<package format="3">
+
+  <name>autonomous_nav_bot</name>
+  <version>0.1.0</version>
+  <description>
+    Autonomous self-driving navigation robot using ROS 2 Humble.
+    Features: differential drive, 2D LiDAR SLAM, AMCL localisation,
+    Nav2 autonomous navigation, sensor fusion via robot_localization.
+  </description>
+
+  <maintainer email="your@email.com">Your Name</maintainer>
+  <license>MIT</license>
+
+  <!-- ── Build tools ─────────────────────────────────────────────── -->
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <buildtool_depend>ament_cmake_python</buildtool_depend>
+
+  <!-- ── Core ROS 2 client libraries ────────────────────────────── -->
+  <depend>rclpy</depend>    <!-- Python ROS 2 client -->
+  <depend>rclcpp</depend>   <!-- C++   ROS 2 client (for future C++ nodes) -->
+
+  <!-- ── Standard message types ──────────────────────────────────── -->
+  <depend>std_msgs</depend>           <!-- String, Int32, Bool, Header … -->
+  <depend>std_srvs</depend>           <!-- Trigger, Empty, SetBool services — used by map_saver.py -->
+  <depend>geometry_msgs</depend>      <!-- Twist, Pose, PoseStamped, Point … -->
+  <depend>sensor_msgs</depend>        <!-- LaserScan, Image, Imu, JointState … -->
+  <depend>nav_msgs</depend>           <!-- Odometry, OccupancyGrid, Path … -->
+
+  <!-- ── TF (Transform) libraries ────────────────────────────────── -->
+  <!-- TF is how ROS knows where each part of the robot is in space -->
+  <depend>tf2</depend>
+  <depend>tf2_ros</depend>
+  <depend>tf2_geometry_msgs</depend>
+
+  <!-- ── Python runtime dependencies ────────────────────────────── -->
+  <!-- numpy is used by lidar_processor (vectorised range filtering)   -->
+  <!-- and imu_processor (per-axis moving average computation)         -->
+  <exec_depend>python3-numpy</exec_depend>
+
+  <!-- ── Step 1: Robot Description ───────────────────────────────── -->
+  <depend>robot_state_publisher</depend>   <!-- publishes TF from URDF -->
+  <depend>joint_state_publisher</depend>   <!-- publishes wheel joint angles -->
+  <depend>joint_state_publisher_gui</depend> <!-- slider GUI for testing -->
+  <depend>xacro</depend>                   <!-- XACRO → URDF preprocessor -->
+  <depend>urdf</depend>                    <!-- URDF parser library -->
+
+  <!-- ── Visualisation ───────────────────────────────────────────── -->
+  <depend>rviz2</depend>
+
+  <!-- ── Step 2: Simulation (Gazebo) ─────────────────────────────── -->
+  <depend>gazebo_ros</depend>           <!-- Gazebo ↔ ROS 2 bridge -->
+  <depend>gazebo_plugins</depend>       <!-- diff_drive, camera, LiDAR plugins -->
+  <depend>gazebo_ros2_control</depend>  <!-- optional hardware abstraction -->
+
+  <!-- ── Step 3: SLAM Mapping ─────────────────────────────────────── -->
+  <depend>slam_toolbox</depend>         <!-- Online/offline SLAM with LiDAR -->
+  <depend>nav2_map_server</depend>      <!-- map_saver_cli called by map_saver.py -->
+
+  <!-- ── Step 4: Localisation ─────────────────────────────────────── -->
+  <depend>robot_localization</depend>   <!-- EKF sensor fusion (IMU + odom) -->
+
+  <!-- ── Step 5: Navigation ───────────────────────────────────────── -->
+  <depend>nav2_bringup</depend>         <!-- Nav2 full-stack launch files -->
+  <depend>nav2_msgs</depend>            <!-- NavigateToPose, ComputePath … -->
+
+  <!-- ── Testing ──────────────────────────────────────────────────── -->
+  <test_depend>ament_lint_auto</test_depend>
+  <test_depend>ament_lint_common</test_depend>
+  <test_depend>ament_copyright</test_depend>
+  <test_depend>ament_flake8</test_depend>      <!-- Python style checker -->
+  <test_depend>ament_pep257</test_depend>       <!-- Python docstring checker -->
+
+  <export>
+    <!-- Tells colcon to use the CMake build system for this package -->
+    <build_type>ament_cmake</build_type>
+  </export>
+
+</package>

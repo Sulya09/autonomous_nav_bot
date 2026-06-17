@@ -1,0 +1,177 @@
+# rviz/robot_display.rviz
+# ════════════════════════
+# Pre-configured RViz2 layout for Step 1: Robot Description verification.
+#
+# Displays:
+#   • Grid         — floor reference
+#   • RobotModel   — 3D robot mesh from URDF
+#   • TF           — coordinate frame axes for every link
+#   • LaserScan    — empty until Gazebo is running (shown as orange dots)
+#
+# This file is auto-loaded by display.launch.py via the -d argument.
+# You can also save changes from within RViz2: File → Save Config.
+
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+    Property Tree Widget:
+      Expanded:
+        - /RobotModel1
+        - /TF1
+        - /LaserScan1
+      Splitter Ratio: 0.6
+    Tree Height: 550
+  - Class: rviz_common/Selection
+    Name: Selection
+  - Class: rviz_common/Tool Properties
+    Name: Tool Properties
+    Expanded:
+      - /2D Goal Pose1
+      - /2D Pose Estimate1
+  - Class: rviz_common/Views
+    Name: Views
+    Splitter Ratio: 0.5
+
+Visualization Manager:
+  Class: ""
+  Displays:
+
+    # ── Floor grid ─────────────────────────────────────────────────────
+    - Alpha: 0.5
+      Cell Size: 0.25
+      Class: rviz_default_plugins/Grid
+      Color: 130; 130; 130
+      Enabled: true
+      Name: Grid
+      Normal Cell Count: 0
+      Offset:
+        X: 0
+        Y: 0
+        Z: 0
+      Plane: XY
+      Plane Cell Count: 20       # 20×20 cells × 0.25 m = 5 m × 5 m grid
+      Reference Frame: <Fixed Frame>
+      Value: true
+
+    # ── Robot 3D model from URDF ───────────────────────────────────────
+    - Alpha: 1
+      Class: rviz_default_plugins/RobotModel
+      Description Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /robot_description
+      Enabled: true
+      Name: RobotModel
+      TF Prefix: ""
+      Update Interval: 0
+      Value: true
+      Visual Enabled: true
+      Collision Enabled: false    # hide collision geometry, show visual only
+
+    # ── TF coordinate frames ───────────────────────────────────────────
+    - Class: rviz_default_plugins/TF
+      Enabled: true
+      Frame Timeout: 15
+      Frames:
+        All Enabled: true
+      Marker Scale: 0.25          # axis arrow size in metres
+      Name: TF
+      Show Arrows: true
+      Show Axes: true
+      Show Names: true
+      Tree: {}
+      Update Interval: 0
+      Value: true
+
+    # ── LiDAR scan (empty until Gazebo runs) ──────────────────────────
+    - Class: rviz_default_plugins/LaserScan
+      Enabled: true
+      Name: LaserScan
+      Color: 255; 80; 0           # bright orange dots
+      Color Transformer: FlatColor
+      Size (m): 0.03
+      Style: Squares
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /scan
+      Value: true
+
+    # ── Odometry arrow ─────────────────────────────────────────────────
+    # Shows direction and speed of the robot (visible once Gazebo runs)
+    - Class: rviz_default_plugins/Odometry
+      Enabled: true
+      Name: Odometry
+      Position Tolerance: 0.1
+      Angle Tolerance: 0.1
+      Keep: 10
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /odom
+      Value: true
+
+  Enabled: true
+
+  Global Options:
+    Background Color: 40; 40; 40   # dark grey background
+    Fixed Frame: base_footprint     # everything is drawn relative to this frame
+    Frame Rate: 30
+
+  Name: root
+
+  Tools:
+    - Class: rviz_default_plugins/Interact
+      Hide Inactive: false
+    - Class: rviz_default_plugins/MoveCamera
+    - Class: rviz_default_plugins/Select
+    - Class: rviz_default_plugins/FocusCamera
+    - Class: rviz_default_plugins/Measure
+      Line color: 128; 128; 0
+    # These two tools become important in Steps 4–5 (Nav2)
+    - Class: rviz_default_plugins/SetInitialPose
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /initialpose
+    - Class: rviz_default_plugins/SetGoal
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /goal_pose
+
+  Value: true
+
+  Views:
+    Current:
+      Class: rviz_default_plugins/Orbit
+      Distance: 1.80           # zoom level in metres
+      Enable Stereo Rendering:
+        Stereo Eye Separation: 0.06
+        Stereo Focal Distance: 1
+        Swap Stereo Eyes: false
+        Value: false
+      Focal Point:
+        X: 0.0
+        Y: 0.0
+        Z: 0.1                 # look slightly above the floor
+      Focal Shape Fixed Size: true
+      Focal Shape Size: 0.05
+      Invert Z Axis: false
+      Name: Current View
+      Near Clip Distance: 0.01
+      Pitch: 0.55              # camera tilt (radians, 0 = top-down)
+      Target Frame: <Fixed Frame>
+      Value: Orbit (rviz)
+      Yaw: 0.80                # camera rotation around vertical axis
+    Saved: ~

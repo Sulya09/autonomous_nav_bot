@@ -1,0 +1,279 @@
+# rviz/navigation.rviz
+# ═════════════════════
+# RViz2 configuration for autonomous navigation.
+#
+# DISPLAY LAYERS (bottom to top — lower layers drawn first):
+#   1. Map              — the static saved map (grey/black/white cells)
+#   2. Global Costmap   — inflated obstacle zones for the planner
+#   3. Local Costmap    — rolling 3m×3m real-time obstacle window
+#   4. Global Path      — the A*-computed route to the goal (green line)
+#   5. LaserScan        — live orange LiDAR readings
+#   6. Robot Model      — 3D model at estimated position
+#   7. TF              — coordinate frames for debugging
+#
+# KEY TOOLS (top toolbar):
+#   🎯 2D Nav Goal      — click + drag on map to send a navigation goal
+#   📍 2D Pose Estimate — reinitialise AMCL if robot appears lost
+#
+# WHAT TO LOOK FOR
+# ─────────────────
+# • Global Costmap: red/yellow inflation around walls. Robot path will
+#   stay away from these cells (that's the inflation layer working).
+# • Global Path (green): the A*-computed route. Updates when the goal
+#   changes or the path is replanned due to an obstacle.
+# • Local Costmap: the small rolling window shows dynamic obstacles.
+#   Watch it update as the robot moves and new obstacles are detected.
+# • Laser scan dots aligned with map black cells = good localisation.
+#   Misaligned dots = AMCL is uncertain → use "2D Pose Estimate".
+
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+    Property Tree Widget:
+      Expanded:
+        - /Map1
+        - /GlobalCostmap1
+        - /GlobalPath1
+      Splitter Ratio: 0.6
+    Tree Height: 680
+  - Class: rviz_common/Selection
+    Name: Selection
+  - Class: rviz_common/Tool Properties
+    Expanded:
+      - /2D Nav Goal1
+      - /2D Pose Estimate1
+    Name: Tool Properties
+
+Visualization Manager:
+  Class: ""
+  Displays:
+
+    # ── Floor reference grid ─────────────────────────────────────────
+    - Alpha: 0.2
+      Cell Size: 1.0
+      Class: rviz_default_plugins/Grid
+      Color: 80; 80; 80
+      Enabled: true
+      Name: Grid
+      Plane: XY
+      Plane Cell Count: 30
+      Reference Frame: map
+      Value: true
+
+    # ── Saved map (static background) ───────────────────────────────
+    - Class: rviz_default_plugins/Map
+      Alpha: 0.7
+      Color Scheme: map
+      Draw Behind: true
+      Enabled: true
+      Name: Map
+      Topic:
+        Depth: 1
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /map
+      Value: true
+
+    # ── Global Costmap ───────────────────────────────────────────────
+    # Shows the inflated obstacle zones used by the global planner.
+    # Colour scheme: white=free, red=lethal, yellow/green=near-lethal.
+    # The robot's planned path avoids all non-white cells.
+    - Class: rviz_default_plugins/Map
+      Alpha: 0.5
+      Color Scheme: costmap    # red gradient = high cost
+      Draw Behind: false
+      Enabled: true
+      Name: GlobalCostmap
+      Topic:
+        Depth: 1
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /global_costmap/costmap
+      Value: true
+
+    # ── Local Costmap ────────────────────────────────────────────────
+    # The rolling 3m×3m obstacle window around the robot.
+    # Updates at 5 Hz to capture dynamic obstacles (people, chairs).
+    - Class: rviz_default_plugins/Map
+      Alpha: 0.45
+      Color Scheme: costmap
+      Draw Behind: false
+      Enabled: true
+      Name: LocalCostmap
+      Topic:
+        Depth: 1
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /local_costmap/costmap
+      Value: true
+
+    # ── Global Path (A*-computed route) ─────────────────────────────
+    # The planned path from current position to goal.
+    # Rendered as a continuous green line on the map.
+    # Replanned when: goal changes, path becomes invalid, or robot deviates.
+    - Buffer Length: 1
+      Class: rviz_default_plugins/Path
+      Color: 0; 200; 0          # bright green
+      Enabled: true
+      Head Diameter: 0.1
+      Head Length: 0.07
+      Length: 0.3
+      Line Style: Lines
+      Line Width: 0.04
+      Name: GlobalPath
+      Radius: 0.03
+      Shaft Diameter: 0.05
+      Shaft Length: 0.1
+      Pose Color: 255; 85; 255
+      Pose Style: None
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /plan
+      Value: true
+
+    # ── Live LiDAR Scan ──────────────────────────────────────────────
+    # Orange dots show what the LiDAR currently sees.
+    # Alignment with map black cells confirms good localisation.
+    - Class: rviz_default_plugins/LaserScan
+      Color: 255; 130; 0
+      Color Transformer: FlatColor
+      Enabled: true
+      Name: LaserScan
+      Size (m): 0.04
+      Style: Spheres
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Best Effort
+        Value: /scan/filtered
+      Value: true
+
+    # ── Robot 3D model ───────────────────────────────────────────────
+    - Alpha: 1
+      Class: rviz_default_plugins/RobotModel
+      Description Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /robot_description
+      Enabled: true
+      Name: RobotModel
+      Value: true
+      Visual Enabled: true
+      Collision Enabled: false
+
+    # ── TF Frames ────────────────────────────────────────────────────
+    # During navigation, verify map→odom→base_footprint exists.
+    # If the robot's 3D model is in the wrong place vs the map,
+    # there is likely a TF chain break.
+    - Class: rviz_default_plugins/TF
+      Enabled: true
+      Frame Timeout: 15
+      Frames:
+        All Enabled: true
+      Marker Scale: 0.15
+      Name: TF
+      Show Arrows: false
+      Show Axes: true
+      Show Names: false
+      Value: true
+
+    # ── Navigation Goal Marker ───────────────────────────────────────
+    # Shows where the current navigation goal is on the map.
+    # Useful to confirm the goal was received correctly.
+    - Class: rviz_default_plugins/Pose
+      Axes Length: 0.3
+      Axes Radius: 0.02
+      Color: 255; 25; 0         # bright red goal indicator
+      Enabled: true
+      Head Radius: 0.08
+      Head Length: 0.08
+      Name: NavGoal
+      Shaft Length: 0.3
+      Shaft Radius: 0.02
+      Shape: Arrow
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /goal_pose
+      Value: true
+
+    # ── AMCL particle cloud (small, in background) ───────────────────
+    - Class: rviz_default_plugins/PoseArray
+      Color: 0; 100; 255        # blue — less prominent than in localization.rviz
+      Enabled: true
+      Arrow Length: 0.06
+      Name: Particles
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /particle_cloud
+      Value: true
+
+  Enabled: true
+
+  Global Options:
+    Background Color: 20; 20; 20
+    Fixed Frame: map
+    Frame Rate: 20
+
+  Name: root
+
+  Tools:
+    - Class: rviz_default_plugins/Interact
+      Hide Inactive: false
+    - Class: rviz_default_plugins/MoveCamera
+
+    # ── "2D Nav Goal" — PRIMARY TOOL FOR NAVIGATION ──────────────────
+    # Click this button, then click + drag on the map.
+    # The arrow direction sets the final heading of the robot.
+    # This sends a PoseStamped to /goal_pose, which goal_navigator.py
+    # relays to Nav2's NavigateToPose action server.
+    - Class: rviz_default_plugins/SetGoal
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /goal_pose
+
+    # ── "2D Pose Estimate" — use if robot appears lost ───────────────
+    - Class: rviz_default_plugins/SetInitialPose
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /initialpose
+
+    - Class: rviz_default_plugins/Select
+    - Class: rviz_default_plugins/FocusCamera
+    - Class: rviz_default_plugins/Measure
+      Line color: 128; 128; 0
+
+  Value: true
+
+  Views:
+    Current:
+      Class: rviz_default_plugins/TopDownOrtho
+      Scale: 40
+      Angle: 0
+      X: 0
+      Y: 0
+      Name: Current View
+      Near Clip Distance: 0.01
+      Target Frame: <Fixed Frame>
+      Value: TopDownOrtho (rviz)
+    Saved: ~
